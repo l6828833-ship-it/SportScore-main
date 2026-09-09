@@ -18,6 +18,9 @@ const TO_API_FOOTBALL = new Map([
   [572, 2], //  UEFA Champions League
   [573, 3], //  UEFA Europa League
   [7685, 848], // UEFA Conference League
+  // English domestic cups
+  [8, 45], //   FA Cup
+  [9, 48], //   EFL Cup (Carabao Cup)
   // Big five
   [7, 39], //   Premier League (England)
   [11, 140], // LaLiga (Spain)

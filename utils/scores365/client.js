@@ -33,8 +33,15 @@ const TTL_STATIC = Number(process.env.SCORES365_TTL_SECONDS) || 900;
 const TIMEOUT_MS = Number(process.env.UPSTREAM_TIMEOUT_MS) || 15000;
 
 const APP_TYPE_ID = process.env.SCORES365_APP_TYPE_ID || '5';
-const LANG_ID = process.env.SCORES365_LANG_ID || '1';
-const USER_COUNTRY_ID = process.env.SCORES365_USER_COUNTRY_ID || '1';
+// 27 = Arabic. 365scores returns team, competition and stage names already in
+// Arabic, which is what the (Arabic) frontend wants — and it covers
+// competitions the app has no English->Arabic mapping for (e.g. the EFL Cup,
+// which comes back as "كأس الكاراباو" rather than English). Override with
+// SCORES365_LANG_ID (1 = English) if a consumer needs Latin names.
+const LANG_ID = process.env.SCORES365_LANG_ID || '27';
+// Match the language's primary region so localized names and the TV-network
+// lookup are regionally consistent. 122 = Saudi Arabia.
+const USER_COUNTRY_ID = process.env.SCORES365_USER_COUNTRY_ID || '122';
 const DEFAULT_TZ = process.env.SCORES365_TIMEZONE || 'UTC';
 
 /**
