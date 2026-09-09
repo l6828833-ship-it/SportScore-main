@@ -18,15 +18,34 @@ const TO_API_FOOTBALL = new Map([
   [572, 2], //  UEFA Champions League
   [573, 3], //  UEFA Europa League
   [7685, 848], // UEFA Conference League
-  // English domestic cups
-  [8, 45], //   FA Cup
-  [9, 48], //   EFL Cup (Carabao Cup)
+  // South American cups
+  [102, 13], //  CONMEBOL Libertadores
+  [389, 11], //  CONMEBOL Sudamericana
   // Big five
   [7, 39], //   Premier League (England)
   [11, 140], // LaLiga (Spain)
   [17, 135], // Serie A (Italy)
   [25, 78], //  Bundesliga (Germany)
   [35, 61], //  Ligue 1 (France)
+  // Domestic cups (each 365scores id verified against the live catalogue)
+  [8, 45], //   FA Cup (England)
+  [9, 48], //   EFL Cup / Carabao Cup (England)
+  [13, 143], // Copa del Rey (Spain)
+  [20, 137], // Coppa Italia (Italy)
+  [28, 81], //  DFB-Pokal (Germany)
+  [37, 66], //  Coupe de France (France)
+  // Other widely-followed leagues
+  [1, 40], //    Championship (England)
+  [57, 88], //   Eredivisie (Netherlands)
+  [73, 94], //   Liga Portugal (Primeira Liga)
+  [61, 179], //  Scottish Premiership
+  [98, 144], //  Jupiler Pro League (Belgium)
+  [78, 203], //  Super Lig (Turkiye)
+  [84, 197], //  Super League (Greece)
+  [113, 71], //  Brasileirao Serie A (Brazil)
+  [141, 262], // Liga MX (Mexico)
+  [147, 98], //  J1 League (Japan)
+  [618, 292], // K League 1 (South Korea)
   // Arab
   [649, 307], //  Saudi League
   [552, 233], //  Egyptian Premier League
