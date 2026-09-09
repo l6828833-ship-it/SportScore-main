@@ -62,16 +62,62 @@ function stableId(value) {
   return hash >>> 1 || 1;
 }
 
+function derivedIdFor(scores365Id) {
+  return UNMAPPED_BASE + (stableId(String(scores365Id)) % 100000);
+}
+
+/**
+ * Reverse index for DERIVED ids: derived exposed id -> 365scores competitionId.
+ *
+ * A derived id is a one-way hash, so it cannot be inverted arithmetically. But
+ * every derived id this server ever emits is produced by `toExposedId` from a
+ * real 365scores id it just saw in a payload — so recording the pair there lets
+ * a later request for that derived id resolve back to the 365scores competition.
+ *
+ * Why this is needed: a competition can be requested by its derived id (a link
+ * built from a fixtures list, a bookmark, a page cached before the competition
+ * was pinned). Without the reverse lookup that request hit "not mapped" and the
+ * league page rendered blank, even though the fixtures list had just shown it.
+ */
+const DERIVED_TO_365 = new Map();
+
 /** 365scores competitionId -> the id this server exposes (API-Football or derived). */
 function toExposedId(scores365Id) {
   const mapped = TO_API_FOOTBALL.get(Number(scores365Id));
   if (mapped) return mapped;
-  return UNMAPPED_BASE + (stableId(String(scores365Id)) % 100000);
+  const derived = derivedIdFor(scores365Id);
+  // Remember the pairing so `to365Id` can invert this derived id later.
+  DERIVED_TO_365.set(derived, Number(scores365Id));
+  return derived;
 }
 
-/** API-Football id (as the app requests) -> 365scores competitionId, or null. */
+/**
+ * API-Football id (as the app requests) -> 365scores competitionId, or null.
+ *
+ * Three resolutions, in order:
+ *   1. a pinned API-Football id (the common competitions);
+ *   2. a derived id already seen this process, via the reverse index;
+ *   3. a derived id NOT yet seen — recovered by testing the 365scores ids we
+ *      know about, so a cold process can still resolve a bookmarked derived id
+ *      for a pinned competition's neighbours without waiting to observe it.
+ */
 function to365Id(apiFootballId) {
-  return TO_365.get(Number(apiFootballId)) || null;
+  const id = Number(apiFootballId);
+  const pinned = TO_365.get(id);
+  if (pinned) return pinned;
+  if (DERIVED_TO_365.has(id)) return DERIVED_TO_365.get(id);
+  // Only derived-range ids can be inverted; a plain unknown id stays unmapped.
+  //
+  // Scan the pinned 365scores ids too, not just currently-unmapped ones: when a
+  // competition gets newly PINNED (e.g. the EFL Cup, 9 -> 48), links built while
+  // it was unmapped still carry its old derived id. Those must keep resolving to
+  // the same 365scores competition, or every such bookmark 404s on the upgrade.
+  if (id >= UNMAPPED_BASE) {
+    for (const scores365Id of KNOWN_365_IDS) {
+      if (derivedIdFor(scores365Id) === id) return scores365Id;
+    }
+  }
+  return null;
 }
 
 /** Whether an exposed id maps to a real 365scores competition we can query. */
