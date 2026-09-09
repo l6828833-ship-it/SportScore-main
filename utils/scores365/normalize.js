@@ -17,6 +17,15 @@ const num = (v) => {
   return Number.isFinite(n) ? n : null;
 };
 
+/**
+ * A goal count from 365scores. Like `num`, but a negative value is 365scores'
+ * "no score" sentinel (-1), not a real result, so it collapses to null.
+ */
+const score = (v) => {
+  const n = num(v);
+  return n != null && n >= 0 ? n : null;
+};
+
 /** Competitor (team) logo from its id. */
 function competitorLogo(id) {
   return id ? `${IMAGE_BASE}/Competitors/${id}` : null;
@@ -45,22 +54,27 @@ function mapStatus(game) {
     .trim()
     .toLowerCase();
 
-  if (/postpon/.test(text)) return 'PST';
-  if (/cancel/.test(text)) return 'CANC';
-  if (/aband/.test(text)) return 'ABD';
-  if (/suspend/.test(text)) return 'SUSP';
+  // The abnormal states (postponed, cancelled, abandoned, suspended) share
+  // statusGroup 4 with a normal "finished", so ONLY the text separates them —
+  // and the text is localized. With langId=27 it arrives in Arabic, so matching
+  // English alone silently let a postponed game ("تأجلت") fall through to "FT"
+  // and show as finished with a placeholder score. Match both languages.
+  if (/postpon|تأجل|مؤجل/.test(text)) return 'PST';
+  if (/cancel|ألغ|ملغا/.test(text)) return 'CANC';
+  if (/aband|توقف|أوقف/.test(text)) return 'ABD';
+  if (/suspend|معلّق|معلق/.test(text)) return 'SUSP';
 
   if (group === 4) {
-    if (/penalt/.test(text)) return 'PEN';
-    if (/after et|a\.e\.t|aet/.test(text)) return 'AET';
+    if (/penalt|ركلات|جزاء/.test(text)) return 'PEN';
+    if (/after et|a\.e\.t|aet|بعد التمديد|وقت إضافي/.test(text)) return 'AET';
     return 'FT';
   }
   if (group === 3) {
-    if (/half\s*time|halftime|\bht\b/.test(text)) return 'HT';
-    if (/extra/.test(text)) return 'ET';
-    if (/penalt/.test(text)) return 'P';
-    if (/1st half|first half/.test(text)) return '1H';
-    if (/2nd half|second half/.test(text)) return '2H';
+    if (/half\s*time|halftime|\bht\b|الشوطين|بين الشوطين|استراحة/.test(text)) return 'HT';
+    if (/extra|إضافي|التمديد/.test(text)) return 'ET';
+    if (/penalt|ركلات|جزاء/.test(text)) return 'P';
+    if (/1st half|first half|الشوط الأول/.test(text)) return '1H';
+    if (/2nd half|second half|الشوط الثاني/.test(text)) return '2H';
     return 'LIVE';
   }
   return 'NS';
@@ -121,8 +135,11 @@ function fixture(game) {
   const finished = ['FT', 'AET', 'PEN'].includes(short);
   const iso = game.startTime ? new Date(game.startTime).toISOString() : null;
   const exposedLeagueId = toExposedId(game.competitionId);
-  const hg = num(game.homeCompetitor && game.homeCompetitor.score);
-  const ag = num(game.awayCompetitor && game.awayCompetitor.score);
+  // 365scores uses -1 as a "no score" sentinel (e.g. a postponed or not-yet-
+  // played game). `num` accepts it as a valid number, so it must be filtered
+  // here, or a match with no result renders a literal "-1 : -1".
+  const hg = score(game.homeCompetitor && game.homeCompetitor.score);
+  const ag = score(game.awayCompetitor && game.awayCompetitor.score);
 
   return {
     fixture: {
@@ -193,8 +210,8 @@ function halftimeFromStages(game) {
   );
   if (!ht) return { home: null, away: null };
   return {
-    home: num(ht.homeCompetitorScore),
-    away: num(ht.awayCompetitorScore),
+    home: score(ht.homeCompetitorScore),
+    away: score(ht.awayCompetitorScore),
   };
 }
 
