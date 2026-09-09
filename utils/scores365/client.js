@@ -37,6 +37,25 @@ const LANG_ID = process.env.SCORES365_LANG_ID || '1';
 const USER_COUNTRY_ID = process.env.SCORES365_USER_COUNTRY_ID || '1';
 const DEFAULT_TZ = process.env.SCORES365_TIMEZONE || 'UTC';
 
+/**
+ * Country used for the TV-network lookup on `/game/`.
+ *
+ * Broadcast rights are territorial, so 365scores returns `tvNetworks` for the
+ * COUNTRY it thinks is asking. With the default `userCountryId` of 1 the array
+ * comes back empty — there is no channel to report for a viewer it cannot place.
+ * Asking as a MENA country returns the beIN assignment, which is the region this
+ * server's consumers cover.
+ *
+ * 122 is Saudi Arabia. Every MENA id tested (Qatar 115, Egypt 131, Tunisia 135,
+ * Algeria 139) returns the same beIN channel for a given match, so the specific
+ * choice only matters if you need a different region — override with
+ * SCORES365_TV_COUNTRY_ID.
+ *
+ * Kept separate from USER_COUNTRY_ID so switching the TV region cannot quietly
+ * alter anything else the id influences.
+ */
+const TV_COUNTRY_ID = process.env.SCORES365_TV_COUNTRY_ID || '122';
+
 const USER_AGENT =
   process.env.SCORES365_USER_AGENT ||
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
@@ -141,9 +160,19 @@ const standings = (competitionId, { timezoneName } = {}) =>
 const stats = (competitionId, { timezoneName } = {}) =>
   get('/stats/', { competitions: competitionId, timezoneName });
 
-/** One game with events, lineups, venue. Short TTL: it may be live. */
+/**
+ * One game with events, lineups, venue and TV networks. Short TTL: it may be live.
+ *
+ * `userCountryId` is overridden to the TV region here. This is the only endpoint
+ * that returns `tvNetworks` — the games list carries just a `hasTVNetworks`
+ * boolean — so a per-match channel is only obtainable through this call.
+ */
 const game = (gameId, { timezoneName } = {}) =>
-  get('/game/', { gameId, timezoneName }, { ttl: TTL_LIVE });
+  get(
+    '/game/',
+    { gameId, timezoneName, userCountryId: TV_COUNTRY_ID },
+    { ttl: TTL_LIVE }
+  );
 
 /** Every competition 365scores tracks, used to build the id map / catalogue. */
 const competitions = () => get('/competitions/', { sports: 1 });

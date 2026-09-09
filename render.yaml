@@ -21,6 +21,15 @@ services:
       # Default data source. No key needed.
       - key: SOURCE
         value: 365scores
+      # Country used ONLY for the per-match TV channel lookup.
+      #
+      # Broadcast rights are territorial: 365scores returns `tvNetworks` for the
+      # country it thinks is asking, and for its default (1) the array comes back
+      # empty. 122 is Saudi Arabia, which yields the beIN assignment used across
+      # MENA — that is what makes a Champions League match report "beIN SPORTS 3"
+      # rather than nothing. Change it to serve a different region.
+      - key: SCORES365_TV_COUNTRY_ID
+        value: "122"
       # Lock CORS to your Netlify site once you know its URL. Comma-separate for
       # several origins. Leave unset to allow all (fine while the API is only
       # called server-side from Next.js, which it is here).

@@ -89,6 +89,31 @@ function team(competitor) {
   };
 }
 
+/**
+ * TV channels carrying a match, from 365scores' `tvNetworks`.
+ *
+ * Real per-fixture broadcast data, which is worth stating plainly because no
+ * mainstream football API exposes it: on a Champions League matchday the nine
+ * simultaneous kickoffs are split across beIN SPORTS 1-9, and this is the only
+ * source wired into this server that says which match is on which number.
+ *
+ * Only present on the `/game/` endpoint, and only when it is queried as a
+ * country the rights cover (see TV_COUNTRY_ID in the client) — the games list
+ * carries a bare `hasTVNetworks` flag and a null array.
+ *
+ * Names arrive as broadcast branding, e.g. "beIN Sport 1 HD". Returned as-is:
+ * normalizing them is a display decision and belongs in the consumer.
+ */
+function tvChannels(game) {
+  const networks = Array.isArray(game && game.tvNetworks) ? game.tvNetworks : [];
+  const names = networks
+    .map((n) => (n && typeof n.name === 'string' ? n.name.trim() : ''))
+    .filter(Boolean);
+  // Deduplicate: a match can be listed against the same channel more than once
+  // when several territories map onto it.
+  return [...new Set(names)];
+}
+
 /** One 365scores game -> one API-Football fixture. */
 function fixture(game) {
   const short = mapStatus(game);
@@ -118,6 +143,14 @@ function fixture(game) {
         short,
         elapsed: short === 'NS' ? null : liveMinute(game),
       },
+      /**
+       * Broadcasters for THIS fixture. Empty for a list response, which does not
+       * carry them; populated on the single-game endpoint.
+       *
+       * Not part of API-Football's fixture shape — an addition, kept here beside
+       * `venue` and `referee` because it is the same class of per-match detail.
+       */
+      tv_channels: tvChannels(game),
     },
     league: {
       id: exposedLeagueId,
@@ -255,6 +288,7 @@ module.exports = {
   mapStatus,
   liveMinute,
   fixture,
+  tvChannels,
   events,
   standingRow,
 };
