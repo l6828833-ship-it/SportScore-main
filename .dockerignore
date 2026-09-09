@@ -1,0 +1,22 @@
+# Never ship these into the build context: the image installs its own
+# dependencies with `npm ci`, and secrets/local files must not leak in.
+node_modules
+npm-debug.log
+
+# Local env and secrets — provided to Cloud Run as runtime env vars instead.
+.env
+.env.*
+!.env.example
+
+# Version control and editor cruft.
+.git
+.gitignore
+.DS_Store
+
+# Docs and platform configs not needed at runtime.
+README.md
+render.yaml
+Procfile
+
+# Puppeteer's downloaded browser cache, if one exists locally.
+.cache
