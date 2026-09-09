@@ -1,0 +1,28 @@
+# Render blueprint for the SportScore backend.
+#
+# Deploy: push this repo to GitHub, then in Render choose "New +" ->
+# "Blueprint" and point it at the repo. Render reads this file and creates the
+# service. Or create a Web Service manually with the same build/start commands.
+services:
+  - type: web
+    name: sportscore-backend
+    runtime: node
+    plan: free
+    # Free instances sleep after inactivity; the first request after a sleep
+    # takes a few seconds to wake. Fine for this use.
+    buildCommand: npm ci
+    startCommand: node index.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # Render injects PORT automatically; index.js already reads process.env.PORT.
+      - key: NODE_VERSION
+        value: "20.6.0"
+      # Default data source. No key needed.
+      - key: SOURCE
+        value: 365scores
+      # Lock CORS to your Netlify site once you know its URL. Comma-separate for
+      # several origins. Leave unset to allow all (fine while the API is only
+      # called server-side from Next.js, which it is here).
+      - key: CORS_ORIGIN
+        sync: false
