@@ -34,29 +34,74 @@ const COMPUTE_FROM_FIXTURES = new Set([
 const CONCURRENCY = Number(process.env.SCORES365_SCORER_CONCURRENCY) || 5;
 const SCORER_LIMIT = Number(process.env.SCORES365_SCORER_LIMIT) || 25;
 
-/** Pull one athlete-stat category (by name) from the stats payload. */
-function categoryRows(body, name) {
+/**
+ * Stat type ids, the language-independent way to find a leaderboard.
+ *
+ * `athletesStats[].name` is LOCALIZED — with the default Arabic `langId` (27)
+ * the goals board is called "الأهداف", not "Goals" — so selecting a category by
+ * its English name found nothing and every domestic league reported an empty
+ * leaderboard. Each category declares its `statsTypes[].typeId`, which is
+ * stable across languages:
+ *
+ *   1 goals   2 assists   10 goals from penalties   3 yellow   4 red
+ *
+ * The FIRST entry in `statsTypes` is the category's own metric (the rest are
+ * the secondary columns), so a category is identified by `statsTypes[0].typeId`.
+ */
+const STAT_TYPE_GOALS = 1;
+const STAT_TYPE_ASSISTS = 2;
+const STAT_TYPE_PENALTY_GOALS = 10;
+
+/** The typeId a category ranks on, i.e. its primary metric. */
+function categoryTypeId(category) {
+  const types = category.statsTypes || [];
+  return types.length ? nz.num(types[0].typeId) : null;
+}
+
+/**
+ * Pull one athlete-stat category from the stats payload.
+ *
+ * Matched on `typeId`, with the localized name kept only as a fallback for a
+ * payload that omits `statsTypes`.
+ */
+function categoryRows(body, typeId, name) {
   const cats = (body.stats && body.stats.athletesStats) || [];
-  const cat = cats.find(
-    (c) => String(c.name || '').toLowerCase() === name.toLowerCase()
-  );
+  const cat =
+    cats.find((c) => categoryTypeId(c) === typeId) ||
+    cats.find((c) => String(c.name || '').toLowerCase() === name.toLowerCase());
   return (cat && cat.rows) || [];
 }
 
-/** First numeric stat value in a row, or from a matching typeId when known. */
-function primaryValue(row) {
+/**
+ * The value a row is ranked on.
+ *
+ * Read by `typeId` when one is given, because a row carries several stats
+ * (goals AND penalties on the goals board) and their order is not guaranteed.
+ * Falls back to the first numeric value.
+ */
+function primaryValue(row, typeId) {
   const stats = row.stats || [];
   if (!stats.length) return null;
+  if (typeId != null) {
+    const hit = stats.find((s) => Number(s.typeId) === typeId);
+    if (hit) return nz.num(hit.value);
+  }
   return nz.num(stats[0].value);
 }
 
-/** Penalties from a Goals row: typeId 10, or parsed from secondaryStatName. */
+/**
+ * Penalties from a Goals row: typeId 10, or parsed from `secondaryStatName`.
+ *
+ * The label is localized ("ضربات الجزاء المسجلة: 0" in Arabic), so the text
+ * fallback accepts a bare trailing number rather than requiring the English
+ * wording. It only ever runs when typeId 10 is absent.
+ */
 function penalties(row) {
-  const pen = (row.stats || []).find((s) => Number(s.typeId) === 10);
-  if (pen) return nz.num(pen.value);
-  const m = /penalties?\s*scored\s*:\s*(\d+)/i.exec(
-    row.secondaryStatName || ''
+  const pen = (row.stats || []).find(
+    (s) => Number(s.typeId) === STAT_TYPE_PENALTY_GOALS
   );
+  if (pen) return nz.num(pen.value);
+  const m = /:\s*(\d+)\s*$/.exec(row.secondaryStatName || '');
   return m ? Number(m[1]) : null;
 }
 
@@ -74,16 +119,18 @@ async function scorersFromStats(compId, params) {
     return { error: 'Empty data after multiple attempts' };
   }
 
-  const goals = categoryRows(body, 'Goals');
+  const goals = categoryRows(body, STAT_TYPE_GOALS, 'Goals');
   if (goals.length === 0) {
     return { error: 'Empty data after multiple attempts' };
   }
 
-  const assistRows = categoryRows(body, 'Assists');
+  const assistRows = categoryRows(body, STAT_TYPE_ASSISTS, 'Assists');
   const assistById = new Map();
   for (const r of assistRows) {
     const e = r.entity || {};
-    if (e.id != null) assistById.set(e.id, primaryValue(r));
+    if (e.id != null) {
+      assistById.set(e.id, primaryValue(r, STAT_TYPE_ASSISTS));
+    }
   }
 
   const topScorers = goals.map((row) => {
@@ -104,7 +151,7 @@ async function scorersFromStats(compId, params) {
           },
           games: { appearences: null },
           goals: {
-            total: primaryValue(row),
+            total: primaryValue(row, STAT_TYPE_GOALS),
             assists: assistById.has(e.id) ? assistById.get(e.id) : null,
           },
           penalty: { scored: penalties(row) },
@@ -132,6 +179,11 @@ async function scorersFromStats(compId, params) {
  */
 async function scorersFromFixtures(compId, params) {
   const opts = { timezoneName: params.timezoneName };
+  // Every game read below is already finished, so its detail is cached for a
+  // day rather than the 30s live TTL. Without this the whole season's games are
+  // re-fetched every half minute and the fan-out grows past the caller's
+  // timeout as the league phase fills up.
+  const gameOpts = { ...opts, finished: true };
   const [resultsRes, fixturesRes] = await Promise.all([
     client.competitionResults(compId, opts).catch(() => ({ games: [] })),
     client.competitionFixtures(compId, opts).catch(() => ({ games: [] })),
@@ -171,7 +223,7 @@ async function scorersFromFixtures(compId, params) {
       const g = finished[cursor++];
       let detail;
       try {
-        detail = (await client.game(g.id, opts)).game;
+        detail = (await client.game(g.id, gameOpts)).game;
       } catch {
         continue; // upstream hiccup on one game must not drop the board
       }

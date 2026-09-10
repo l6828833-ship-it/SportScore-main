@@ -216,6 +216,27 @@ function halftimeFromStages(game) {
 }
 
 /**
+ * Event type ids, which are the ONLY language-independent way to classify an
+ * event.
+ *
+ * `eventType.name` and `subTypeName` are LOCALIZED: with the default Arabic
+ * `langId` (27) a goal arrives as "هدف", not "Goal". Matching on the English
+ * text therefore discarded every goal on every game — no scorers on a match
+ * page, and an empty computed leaderboard for the cups. The numeric ids are
+ * stable across languages, verified against 60 finished games:
+ *
+ *   eventType.id  1 Goal   2 Yellow Card   3 Red Card
+ *                 6 Penalty Miss   11 Goal Disallowed (VAR)   12 Woodwork
+ *   subTypeId (on a Goal)  1 Field Goal   2 Own Goal   3 Penalty
+ *
+ * Note 11 (Goal Disallowed) is its own type, so an id test cannot mistake a
+ * chalked-off goal for a real one.
+ */
+const EVENT_TYPE_GOAL = 1;
+const GOAL_SUBTYPE_OWN = 2;
+const GOAL_SUBTYPE_PENALTY = 3;
+
+/**
  * Goal events from a game detail, resolved to player names.
  *
  * Each event references players by `members[].id`. Goals carry the scorer in
@@ -230,9 +251,21 @@ function events(game) {
   const out = [];
 
   for (const ev of game.events || []) {
-    const type = ev.eventType && ev.eventType.name;
-    if (type !== 'Goal') continue;
-    const subtype = String((ev.eventType && ev.eventType.subTypeName) || '');
+    const eventType = ev.eventType || {};
+    const typeId = num(eventType.id);
+    const typeName = String(eventType.name || '');
+    // Id first; the name test only covers a payload that omits the id.
+    const isGoal =
+      typeId != null ? typeId === EVENT_TYPE_GOAL : typeName === 'Goal';
+    if (!isGoal) continue;
+
+    const subTypeId = num(eventType.subTypeId);
+    const subtype = String(eventType.subTypeName || '');
+    const isOwnGoal =
+      subTypeId === GOAL_SUBTYPE_OWN || /own|عكس/i.test(subtype);
+    const isPenalty =
+      subTypeId === GOAL_SUBTYPE_PENALTY || /penalt|جزاء/i.test(subtype);
+
     const isHome = ev.competitorId === homeId;
     const assistId = Array.isArray(ev.extraPlayers) ? ev.extraPlayers[0] : null;
 
@@ -248,11 +281,7 @@ function events(game) {
         ? { id: num(assistId), name: members.get(assistId) || null }
         : { id: null, name: null },
       type: 'Goal',
-      detail: /own/i.test(subtype)
-        ? 'Own Goal'
-        : /penalt/i.test(subtype)
-          ? 'Penalty'
-          : 'Normal Goal',
+      detail: isOwnGoal ? 'Own Goal' : isPenalty ? 'Penalty' : 'Normal Goal',
       comments: null,
       isHome,
     });

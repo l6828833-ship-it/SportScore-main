@@ -168,17 +168,31 @@ const stats = (competitionId, { timezoneName } = {}) =>
   get('/stats/', { competitions: competitionId, timezoneName });
 
 /**
- * One game with events, lineups, venue and TV networks. Short TTL: it may be live.
+ * How long a FINISHED game's detail is kept.
+ *
+ * A finished game's events, lineups and score never change again, so the live
+ * TTL is pure waste for one — and it is not a small waste: the cup leaderboards
+ * are computed by reading every finished league-phase game, so a 30-second
+ * lifetime meant re-fetching the entire season's games every half minute. With
+ * a full Champions League league phase (~180 games) that fan-out alone outruns
+ * the caller's request budget. Callers opt in by passing `finished: true`.
+ */
+const TTL_FINISHED = Number(process.env.SCORES365_TTL_FINISHED_SECONDS) || 86400;
+
+/**
+ * One game with events, lineups, venue and TV networks. Short TTL by default:
+ * it may be live. Pass `finished: true` for a game that has already ended to
+ * cache it for a day instead.
  *
  * `userCountryId` is overridden to the TV region here. This is the only endpoint
  * that returns `tvNetworks` — the games list carries just a `hasTVNetworks`
  * boolean — so a per-match channel is only obtainable through this call.
  */
-const game = (gameId, { timezoneName } = {}) =>
+const game = (gameId, { timezoneName, finished = false } = {}) =>
   get(
     '/game/',
     { gameId, timezoneName, userCountryId: TV_COUNTRY_ID },
-    { ttl: TTL_LIVE }
+    { ttl: finished ? TTL_FINISHED : TTL_LIVE }
   );
 
 /** Every competition 365scores tracks, used to build the id map / catalogue. */
