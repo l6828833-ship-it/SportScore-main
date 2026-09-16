@@ -52,6 +52,34 @@ const TO_API_FOOTBALL = new Map([
   [20, 137], // Coppa Italia (Italy)
   [28, 81], //  DFB-Pokal (Germany)
   [37, 66], //  Coupe de France (France)
+  /**
+   * Arab domestic cups, on LOCALLY ASSIGNED ids in the 900000+ range.
+   *
+   * Every other value in this table is API-Football's own id. These are not:
+   * API-Football's id list is only published inside its dashboard, and guessing
+   * from a league's neighbouring number is how you silently map a cup onto some
+   * unrelated competition. So rather than invent plausible-looking ids, they get
+   * explicit local ones, and the range says so at a glance.
+   *
+   * Safe by construction: API-Football's ids are all below ~1300 and this file's
+   * derived ids occupy 800000-899999, so 900000+ can collide with neither.
+   *
+   * If SOURCE=apifootball is ever used, these nine need their real ids — nothing
+   * else here does. Until then the id is just the handle the frontend pins, and a
+   * competition with no handle cannot be curated at all: it stays on a derived id
+   * that a cold process cannot even resolve back to a 365scores competition.
+   *
+   * 365scores ids from the live /competitions catalogue.
+   */
+  [5501, 900001], // كأس الملك (Saudi King's Cup)
+  [553, 900002], //  كأس مصر (Egypt Cup)
+  [5420, 900003], // كأس العرش (Moroccan Throne Cup)
+  [6346, 900004], // كأس رئيس الدولة (UAE President's Cup)
+  [6242, 900005], // كأس أمير قطر (Qatar Emir Cup)
+  [5558, 900006], // كأس تونس (Tunisian Cup)
+  [558, 900007], //  كأس الجزائر (Algerian Cup)
+  [5635, 900008], // كأس الأردن (Jordan Cup)
+  [7181, 900009], // كأس العراق (Iraq Cup)
   // Other widely-followed leagues
   [1, 40], //    Championship (England)
   [57, 88], //   Eredivisie (Netherlands)

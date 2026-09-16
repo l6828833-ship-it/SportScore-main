@@ -46,6 +46,16 @@ const CUP_IDS = new Set([
   137, // Coppa Italia
   81, //  DFB-Pokal
   66, //  Coupe de France
+  // Arab domestic cups, on locally assigned ids — see utils/scores365/leagues.js.
+  900001, // كأس الملك (Saudi)
+  900002, // كأس مصر
+  900003, // كأس العرش (Morocco)
+  900004, // كأس رئيس الدولة (UAE)
+  900005, // كأس أمير قطر
+  900006, // كأس تونس
+  900007, // كأس الجزائر
+  900008, // كأس الأردن
+  900009, // كأس العراق
 ]);
 
 /**
