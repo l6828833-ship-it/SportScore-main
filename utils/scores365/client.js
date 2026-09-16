@@ -87,6 +87,13 @@ function withCommon(params = {}) {
   };
 }
 
+/** Is `key` absent or an empty array on this payload? */
+function isEmptyList(body, key) {
+  if (!body || typeof body !== 'object') return true;
+  const value = body[key];
+  return !Array.isArray(value) || value.length === 0;
+}
+
 /** Build a stable cache key from a path and its sorted params. */
 function keyFor(path, params) {
   const sorted = Object.keys(params)
@@ -96,7 +103,36 @@ function keyFor(path, params) {
   return `scores365:${path}?${sorted}`;
 }
 
-async function get(path, params = {}, { ttl = TTL_STATIC } = {}) {
+/**
+ * One request, with the encoding we ask for.
+ *
+ * `acceptEncoding` is explicit because it changes the ANSWER, not just the
+ * transfer — see the retry in `get` below.
+ */
+function request(path, query, acceptEncoding) {
+  return axios.get(`${BASE}${path}`, {
+    params: query,
+    timeout: TIMEOUT_MS,
+    // Undo axios's automatic gzip handling when asking for identity, or it
+    // re-adds its own Accept-Encoding and the header we set is ignored.
+    decompress: acceptEncoding !== 'identity',
+    headers: {
+      'User-Agent': USER_AGENT,
+      Accept: 'application/json',
+      // 365scores answers 406 without a same-site referer.
+      Referer: 'https://www.365scores.com/',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept-Encoding': acceptEncoding,
+    },
+  });
+}
+
+/**
+ * @param expect Name of an array the payload must contain a non-empty value for.
+ *   When it comes back missing or empty, the request is retried UNCOMPRESSED —
+ *   see below for why that is not as silly as it looks.
+ */
+async function get(path, params = {}, { ttl = TTL_STATIC, expect } = {}) {
   const query = withCommon(params);
   const cacheKey = keyFor(path, query);
   const hit = cache.get(cacheKey);
@@ -104,17 +140,32 @@ async function get(path, params = {}, { ttl = TTL_STATIC } = {}) {
 
   let response;
   try {
-    response = await axios.get(`${BASE}${path}`, {
-      params: query,
-      timeout: TIMEOUT_MS,
-      headers: {
-        'User-Agent': USER_AGENT,
-        Accept: 'application/json',
-        // 365scores answers 406 without a same-site referer.
-        Referer: 'https://www.365scores.com/',
-        'Accept-Language': 'en-US,en;q=0.9',
-      },
-    });
+    response = await request(path, query, 'gzip, deflate, br');
+
+    /**
+     * Retry without compression when the payload came back empty.
+     *
+     * 365scores' edge serves DIFFERENT CONTENT for the compressed and
+     * uncompressed variants of the same URL. Verified on the World Cup's results:
+     * the identical query returns 89 games with `Accept-Encoding: identity` and 0
+     * games with gzip, reproducibly, while the Champions League and CAF return 18
+     * and 58 either way. So it is a per-resource fault in their cache, not
+     * something about the query — which is why it cannot be fixed by changing
+     * what we ask for.
+     *
+     * The effect was a competition with a full history of results reporting none:
+     * the World Cup's matches tab was empty, and the computed leaderboards and
+     * knockout bracket that read the same feed had nothing to work from.
+     *
+     * Compression stays the default because these payloads are large (190 KB
+     * uncompressed for one competition) and almost all of them are served
+     * correctly. The retry only costs a second request on the rare resource that
+     * is broken, and it self-heals if the fault moves to another one.
+     */
+    if (expect && isEmptyList(response.data, expect)) {
+      const plain = await request(path, query, 'identity').catch(() => null);
+      if (plain && !isEmptyList(plain.data, expect)) response = plain;
+    }
   } catch (error) {
     throw new Scores365Error(
       `365scores request failed for ${path}: ${error.message}`,
@@ -147,21 +198,33 @@ const gamesOnDate = (dateKey, { isToday, timezoneName } = {}) => {
   return get(
     '/games/allscores/',
     { sports: 1, startDate: date, endDate: date, timezoneName },
-    { ttl: isToday ? TTL_LIVE : TTL_STATIC }
+    { ttl: isToday ? TTL_LIVE : TTL_STATIC, expect: 'games' }
   );
 };
 
 /** Upcoming games for a competition. */
 const competitionFixtures = (competitionId, { timezoneName } = {}) =>
-  get('/games/fixtures/', { competitions: competitionId, timezoneName });
+  get(
+    '/games/fixtures/',
+    { competitions: competitionId, timezoneName },
+    { expect: 'games' }
+  );
 
 /** Past games for a competition. */
 const competitionResults = (competitionId, { timezoneName } = {}) =>
-  get('/games/results/', { competitions: competitionId, timezoneName });
+  get(
+    '/games/results/',
+    { competitions: competitionId, timezoneName },
+    { expect: 'games' }
+  );
 
 /** League table for a competition. */
 const standings = (competitionId, { timezoneName } = {}) =>
-  get('/standings/', { competitions: competitionId, timezoneName });
+  get(
+    '/standings/',
+    { competitions: competitionId, timezoneName },
+    { expect: 'standings' }
+  );
 
 /** Player stat leaderboards (goals, assists, ...) for a competition. */
 const stats = (competitionId, { timezoneName } = {}) =>

@@ -128,6 +128,23 @@ function tvChannels(game) {
   return [...new Set(names)];
 }
 
+/**
+ * The knockout round, or the group, that a game belongs to.
+ *
+ * Both are localized free text from the source, which is fine — the consumer
+ * displays them and matches them against patterns in the same language. What
+ * matters here is the ORDER: `stageName` identifies a knockout round and only
+ * appears on knockout games, so it wins; `groupName` labels a group-stage game;
+ * `roundName` is deliberately not consulted, because on this source it is the
+ * same generic word for every game in a competition.
+ */
+function stageOrGroupName(game) {
+  const stage = typeof game.stageName === 'string' ? game.stageName.trim() : '';
+  if (stage) return stage;
+  const group = typeof game.groupName === 'string' ? game.groupName.trim() : '';
+  return group || null;
+}
+
 /** One 365scores game -> one API-Football fixture. */
 function fixture(game) {
   const short = mapStatus(game);
@@ -176,14 +193,25 @@ function fixture(game) {
       logo: competitionLogo(game.competitionId),
       flag: null,
       season: num(game.seasonNum),
-      // Round name for cups; a plain "Round" for leagues is dropped so the
-      // standings phase filter and bracket logic behave like the other sources.
+      /**
+       * The phase this game belongs to: a knockout round, a group, or a matchday.
+       *
+       * `stageName` FIRST, because that is where the knockout round lives —
+       * "دور الـ 16", "ربع النهائي", "نصف النهائي", "النهائي". `roundName` was
+       * being used instead, and on this source it is the generic word "الجولة"
+       * for every game in the competition: the old English test
+       * (`!== 'round'`) never matched an Arabic string, so every fixture came out
+       * labelled "الجولة" and nothing downstream could tell a final from a group
+       * game. That is why the World Cup showed no bracket.
+       *
+       * Then `groupName` ("المجموعة أ") for a group stage, then the matchday
+       * number for a plain league. A bare "الجولة"/"round" with no number carries
+       * no information and is dropped, so consumers see null rather than a label
+       * that means nothing.
+       */
       round:
-        game.roundName && game.roundName.toLowerCase() !== 'round'
-          ? game.roundName
-          : game.roundNum
-            ? `Round ${game.roundNum}`
-            : null,
+        stageOrGroupName(game) ??
+        (game.roundNum ? `Round ${game.roundNum}` : null),
     },
     teams: { home: team(game.homeCompetitor), away: team(game.awayCompetitor) },
     goals: {

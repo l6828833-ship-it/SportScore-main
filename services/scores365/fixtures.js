@@ -21,6 +21,47 @@ function shiftDate(dateKey, days) {
 
 const IN_PLAY = new Set(['1H', '2H', 'HT', 'ET', 'P', 'PEN', 'LIVE', 'SUSP']);
 
+/**
+ * Exposed ids that are knockout competitions.
+ *
+ * The primary test, because it cannot be defeated by wording. `isCup` used to be
+ * decided by an English regex over the competition's DISPLAY NAME — and the
+ * display name is localized, so "كأس العالم" never matched /cup|world/ and the
+ * World Cup was reported as a plain league. The consumer then showed no knockout
+ * bracket for it.
+ */
+const CUP_IDS = new Set([
+  1, //   FIFA World Cup
+  2, //   UEFA Champions League
+  3, //   UEFA Europa League
+  848, // UEFA Conference League
+  17, //  AFC Champions League Elite
+  12, //  CAF Champions League
+  13, //  CONMEBOL Libertadores
+  11, //  CONMEBOL Sudamericana
+  6, //   Africa Cup of Nations
+  45, //  FA Cup
+  48, //  EFL Cup
+  143, // Copa del Rey
+  137, // Coppa Italia
+  81, //  DFB-Pokal
+  66, //  Coupe de France
+]);
+
+/**
+ * A knockout STAGE name on any game also proves it, whatever the id.
+ *
+ * Matched in both languages so an unpinned cup is still recognised: the source
+ * labels these "دور الـ 16" / "ربع النهائي" / "نصف النهائي" / "النهائي" under
+ * Arabic, and "Round of 16" / "Quarter-Finals" / … under English.
+ */
+const KNOCKOUT_STAGE = /final|semi|quarter|round of|1\/8|1\/4|نهائي|دور ال/i;
+
+function looksLikeCup(exposedId, game) {
+  if (CUP_IDS.has(Number(exposedId))) return true;
+  return KNOCKOUT_STAGE.test(game.stageName || '');
+}
+
 /** All games on a date, normalized. */
 async function fixturesForDate(dateKey, timezoneName) {
   const isToday = dateKey === todayKey();
@@ -154,13 +195,7 @@ const getLeagueFixtures = async (params = {}) => {
     if (seen.has(g.id)) continue;
     seen.add(g.id);
     name = name || g.competitionDisplayName;
-    if (
-      /cup|champions|europa|conference|world|libertadores|nations/i.test(
-        g.competitionDisplayName || ''
-      )
-    ) {
-      isCup = true;
-    }
+    if (looksLikeCup(exposedId, g)) isCup = true;
     fixtures.push(shape.fixture(g));
   }
   fixtures.sort(
