@@ -261,8 +261,60 @@ function halftimeFromStages(game) {
  * chalked-off goal for a real one.
  */
 const EVENT_TYPE_GOAL = 1;
+const EVENT_TYPE_YELLOW = 2;
+const EVENT_TYPE_RED = 3;
+const EVENT_TYPE_PENALTY_MISS = 6;
+const EVENT_TYPE_GOAL_DISALLOWED = 11;
 const GOAL_SUBTYPE_OWN = 2;
 const GOAL_SUBTYPE_PENALTY = 3;
+/** A red card shown for a second bookable offence rather than straight. */
+const RED_SUBTYPE_SECOND_YELLOW = 21;
+
+/**
+ * What this event is, in API-Football's `type` / `detail` vocabulary.
+ *
+ * Only goals used to be emitted, so a match page could show who scored and
+ * nothing else — no bookings, no missed penalties, no chalked-off goals. The
+ * classification is by numeric id for the reason given above: the names are
+ * localized, so testing them in English silently matched nothing.
+ *
+ * Returns null for events not worth a timeline row. Substitutions (1000) are
+ * excluded deliberately: there are around ten a match and they would bury the
+ * incidents among routine changes.
+ */
+function classifyEvent(eventType) {
+  const typeId = num(eventType.id);
+  const subTypeId = num(eventType.subTypeId);
+  const subtype = String(eventType.subTypeName || '');
+
+  switch (typeId) {
+    case EVENT_TYPE_GOAL: {
+      const own = subTypeId === GOAL_SUBTYPE_OWN || /own|عكس|ذاتي/i.test(subtype);
+      const penalty =
+        subTypeId === GOAL_SUBTYPE_PENALTY || /penalt|جزاء/i.test(subtype);
+      return {
+        type: 'Goal',
+        detail: own ? 'Own Goal' : penalty ? 'Penalty' : 'Normal Goal',
+      };
+    }
+    case EVENT_TYPE_YELLOW:
+      return { type: 'Card', detail: 'Yellow Card' };
+    case EVENT_TYPE_RED:
+      return {
+        type: 'Card',
+        detail:
+          subTypeId === RED_SUBTYPE_SECOND_YELLOW || /second|ثانية/i.test(subtype)
+            ? 'Second Yellow card'
+            : 'Red Card',
+      };
+    case EVENT_TYPE_PENALTY_MISS:
+      return { type: 'Missed Penalty', detail: 'Missed Penalty' };
+    case EVENT_TYPE_GOAL_DISALLOWED:
+      return { type: 'Var', detail: 'Goal Disallowed' };
+    default:
+      return null;
+  }
+}
 
 /**
  * Goal events from a game detail, resolved to player names.
@@ -279,23 +331,16 @@ function events(game) {
   const out = [];
 
   for (const ev of game.events || []) {
-    const eventType = ev.eventType || {};
-    const typeId = num(eventType.id);
-    const typeName = String(eventType.name || '');
-    // Id first; the name test only covers a payload that omits the id.
-    const isGoal =
-      typeId != null ? typeId === EVENT_TYPE_GOAL : typeName === 'Goal';
-    if (!isGoal) continue;
-
-    const subTypeId = num(eventType.subTypeId);
-    const subtype = String(eventType.subTypeName || '');
-    const isOwnGoal =
-      subTypeId === GOAL_SUBTYPE_OWN || /own|عكس/i.test(subtype);
-    const isPenalty =
-      subTypeId === GOAL_SUBTYPE_PENALTY || /penalt|جزاء/i.test(subtype);
+    const kind = classifyEvent(ev.eventType || {});
+    if (!kind) continue;
 
     const isHome = ev.competitorId === homeId;
-    const assistId = Array.isArray(ev.extraPlayers) ? ev.extraPlayers[0] : null;
+    // Only a goal carries an assister here; on a card the extra player slot is
+    // either empty or unrelated, so it is read for goals alone.
+    const assistId =
+      kind.type === 'Goal' && Array.isArray(ev.extraPlayers)
+        ? ev.extraPlayers[0]
+        : null;
 
     out.push({
       time: { elapsed: num(ev.gameTime), extra: num(ev.addedTime) || null },
@@ -308,8 +353,8 @@ function events(game) {
       assist: assistId
         ? { id: num(assistId), name: members.get(assistId) || null }
         : { id: null, name: null },
-      type: 'Goal',
-      detail: isOwnGoal ? 'Own Goal' : isPenalty ? 'Penalty' : 'Normal Goal',
+      type: kind.type,
+      detail: kind.detail,
       comments: null,
       isHome,
     });
