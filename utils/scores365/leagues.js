@@ -18,6 +18,24 @@ const TO_API_FOOTBALL = new Map([
   [572, 2], //  UEFA Champions League
   [573, 3], //  UEFA Europa League
   [7685, 848], // UEFA Conference League
+  /**
+   * Asian and African club cups.
+   *
+   * Both were unmapped, so they were served behind derived ids (623 -> 884619,
+   * 624 -> 851047) with no Arabic name and no popularity rank — which for an
+   * Arabic-language audience is backwards: these are the competitions Saudi,
+   * Emirati, Qatari, Egyptian, Moroccan and Tunisian clubs actually play in.
+   *
+   * The 365scores ids are from the live `/competitions` catalogue: 623 is
+   * "دوري أبطال آسيا للنخبة" and 624 is "دوري أبطال أفريقيا". The values are
+   * API-Football's ids for the same competitions, kept consistent with the rest
+   * of this table so a switch to SOURCE=apifootball needs no remapping.
+   *
+   * Links built while they were unmapped still resolve: `to365Id` inverts a
+   * derived id by scanning the pinned ids, which now include these two.
+   */
+  [623, 17], // AFC Champions League Elite
+  [624, 12], // CAF Champions League
   // South American cups
   [102, 13], //  CONMEBOL Libertadores
   [389, 11], //  CONMEBOL Sudamericana
