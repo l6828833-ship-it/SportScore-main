@@ -327,6 +327,26 @@ function events(game) {
   const members = new Map(
     (game.members || []).map((m) => [m.id, m.name || m.shortName || null])
   );
+  /**
+   * Which team each player actually belongs to.
+   *
+   * Needed because of own goals. This source attributes an own-goal event to the
+   * team that BENEFITS, not the team of the player who scored it — verified on a
+   * Puebla-Toluca game where the scorer's `members[].competitorId` was Puebla
+   * while the event's `competitorId` was Toluca. Passing that through meant a row
+   * reading "Villalibre · Barcelona · own goal" for a player who does not play for
+   * Barcelona.
+   *
+   * So `team` is normalized to mean one thing everywhere: the team of the player
+   * the event is about, which is also API-Football's convention. Deciding which
+   * side of a timeline an own goal belongs on is then the consumer's call, and it
+   * has the information to make it.
+   */
+  const playerTeam = new Map(
+    (game.members || [])
+      .filter((m) => m && m.id != null && m.competitorId != null)
+      .map((m) => [m.id, m.competitorId])
+  );
   const homeId = game.homeCompetitor && game.homeCompetitor.id;
   const out = [];
 
@@ -334,7 +354,11 @@ function events(game) {
     const kind = classifyEvent(ev.eventType || {});
     if (!kind) continue;
 
-    const isHome = ev.competitorId === homeId;
+    // The player's own team, falling back to the event's when the lineup does
+    // not name them. Only own goals actually differ; for everything else the two
+    // are the same team.
+    const teamId = playerTeam.get(ev.playerId) ?? ev.competitorId;
+    const isHome = teamId === homeId;
     // Only a goal carries an assister here; on a card the extra player slot is
     // either empty or unrelated, so it is read for goals alone.
     const assistId =
@@ -345,9 +369,9 @@ function events(game) {
     out.push({
       time: { elapsed: num(ev.gameTime), extra: num(ev.addedTime) || null },
       team: {
-        id: num(ev.competitorId),
+        id: num(teamId),
         name: null,
-        logo: competitorLogo(ev.competitorId),
+        logo: competitorLogo(teamId),
       },
       player: { id: num(ev.playerId), name: members.get(ev.playerId) || null },
       assist: assistId
