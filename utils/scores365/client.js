@@ -34,11 +34,57 @@ const TIMEOUT_MS = Number(process.env.UPSTREAM_TIMEOUT_MS) || 15000;
 
 const APP_TYPE_ID = process.env.SCORES365_APP_TYPE_ID || '5';
 // 27 = Arabic. 365scores returns team, competition and stage names already in
-// Arabic, which is what the (Arabic) frontend wants — and it covers
-// competitions the app has no English->Arabic mapping for (e.g. the EFL Cup,
-// which comes back as "كأس الكاراباو" rather than English). Override with
-// SCORES365_LANG_ID (1 = English) if a consumer needs Latin names.
+// Arabic, which is what the (Arabic) website wants — and it covers competitions
+// the app has no English->Arabic mapping for (e.g. the EFL Cup, which comes back
+// as "كأس الكاراباو" rather than English). Still the DEFAULT, so a consumer that
+// sends nothing keeps the behaviour it has today; override the default with
+// SCORES365_LANG_ID, or per request with `?lang=`.
 const LANG_ID = process.env.SCORES365_LANG_ID || '27';
+
+/**
+ * 365scores language ids, by ISO 639-1 code: the languages this server's
+ * consumers use. Names are localized by the SOURCE, so the language is chosen
+ * per REQUEST rather than per deployment: the website is Arabic, the Android
+ * app ships in nine languages, and one process serves both.
+ *
+ * 365scores publishes no list. Each id was identified from the live feed by
+ * how it names Germany ("Alemania", "Allemagne", "Deutschland", "Germania",
+ * "Alemanha", "Almanya", "Jerman") and the World Cup, because many neighbouring
+ * ids are near-duplicates (14 is Spain's Spanish, 29 Latin America's; 31 is
+ * Brazil's Portuguese, 30 Portugal's; 36 is Romanian, not Italian). The app's
+ * Portuguese is Brazilian, hence 31. Indonesian is accepted as both `id` and
+ * Android's legacy `in`.
+ *
+ * Unknown codes fall back to the default rather than erroring. A reader whose
+ * language is not translated is better served Arabic names than a 400.
+ */
+const LANG_IDS = {
+  ar: '27',
+  en: '1',
+  es: '14',
+  fr: '15',
+  de: '16',
+  it: '12',
+  pt: '31',
+  tr: '33',
+  id: '34',
+  in: '34',
+};
+
+/**
+ * Resolves a consumer's `lang` into a 365scores `langId`.
+ *
+ * Accepts either form, so `?lang=en`, `?lang=en-GB` and `?langId=1` all work —
+ * a client sending a full BCP 47 tag (which `Locale.getDefault().language` on
+ * Android will not, but a browser's `navigator.language` does) should not
+ * silently get Arabic.
+ */
+function resolveLangId(lang) {
+  if (lang === undefined || lang === null || lang === '') return LANG_ID;
+  const text = String(lang).trim().toLowerCase();
+  if (/^\d+$/.test(text)) return text;
+  return LANG_IDS[text.split(/[-_]/)[0]] || LANG_ID;
+}
 // Match the language's primary region so localized names and the TV-network
 // lookup are regionally consistent. 122 = Saudi Arabia.
 const USER_COUNTRY_ID = process.env.SCORES365_USER_COUNTRY_ID || '122';
@@ -76,14 +122,22 @@ class Scores365Error extends Error {
   }
 }
 
-/** Merge the site's mandatory query params with the caller's, caller wins. */
+/**
+ * Merge the site's mandatory query params with the caller's, caller wins.
+ *
+ * `langId` is resolved AFTER the spread, not left to it. Every method below
+ * passes `langId` through from its options, so an absent one arrives here as
+ * `undefined` — and `...params` would happily overwrite the default with it.
+ * 365scores answers 406 when a mandatory param goes missing, so that would turn
+ * "the caller didn't specify a language" into a dead endpoint.
+ */
 function withCommon(params = {}) {
   return {
     appTypeId: APP_TYPE_ID,
-    langId: LANG_ID,
     timezoneName: params.timezoneName || DEFAULT_TZ,
     userCountryId: USER_COUNTRY_ID,
     ...params,
+    langId: resolveLangId(params.langId),
   };
 }
 
@@ -169,7 +223,7 @@ async function get(path, params = {}, { ttl = TTL_STATIC, expect } = {}) {
   } catch (error) {
     throw new Scores365Error(
       `365scores request failed for ${path}: ${error.message}`,
-      error.response ? error.response.status : 503
+      error.response ? error.response.status : 503,
     );
   }
 
@@ -193,42 +247,42 @@ const toApiDate = (dateKey) => {
  * dated `allscores` call returns exactly the requested day, in full. Today's
  * request still gets the short live TTL so scores stay fresh.
  */
-const gamesOnDate = (dateKey, { isToday, timezoneName } = {}) => {
+const gamesOnDate = (dateKey, { isToday, timezoneName, langId } = {}) => {
   const date = toApiDate(dateKey);
   return get(
     '/games/allscores/',
-    { sports: 1, startDate: date, endDate: date, timezoneName },
-    { ttl: isToday ? TTL_LIVE : TTL_STATIC, expect: 'games' }
+    { sports: 1, startDate: date, endDate: date, timezoneName, langId },
+    { ttl: isToday ? TTL_LIVE : TTL_STATIC, expect: 'games' },
   );
 };
 
 /** Upcoming games for a competition. */
-const competitionFixtures = (competitionId, { timezoneName } = {}) =>
+const competitionFixtures = (competitionId, { timezoneName, langId } = {}) =>
   get(
     '/games/fixtures/',
-    { competitions: competitionId, timezoneName },
-    { expect: 'games' }
+    { competitions: competitionId, timezoneName, langId },
+    { expect: 'games' },
   );
 
 /** Past games for a competition. */
-const competitionResults = (competitionId, { timezoneName } = {}) =>
+const competitionResults = (competitionId, { timezoneName, langId } = {}) =>
   get(
     '/games/results/',
-    { competitions: competitionId, timezoneName },
-    { expect: 'games' }
+    { competitions: competitionId, timezoneName, langId },
+    { expect: 'games' },
   );
 
 /** League table for a competition. */
-const standings = (competitionId, { timezoneName } = {}) =>
+const standings = (competitionId, { timezoneName, langId } = {}) =>
   get(
     '/standings/',
-    { competitions: competitionId, timezoneName },
-    { expect: 'standings' }
+    { competitions: competitionId, timezoneName, langId },
+    { expect: 'standings' },
   );
 
 /** Player stat leaderboards (goals, assists, ...) for a competition. */
-const stats = (competitionId, { timezoneName } = {}) =>
-  get('/stats/', { competitions: competitionId, timezoneName });
+const stats = (competitionId, { timezoneName, langId } = {}) =>
+  get('/stats/', { competitions: competitionId, timezoneName, langId });
 
 /**
  * How long a FINISHED game's detail is kept.
@@ -240,7 +294,8 @@ const stats = (competitionId, { timezoneName } = {}) =>
  * a full Champions League league phase (~180 games) that fan-out alone outruns
  * the caller's request budget. Callers opt in by passing `finished: true`.
  */
-const TTL_FINISHED = Number(process.env.SCORES365_TTL_FINISHED_SECONDS) || 86400;
+const TTL_FINISHED =
+  Number(process.env.SCORES365_TTL_FINISHED_SECONDS) || 86400;
 
 /**
  * One game with events, lineups, venue and TV networks. Short TTL by default:
@@ -251,18 +306,33 @@ const TTL_FINISHED = Number(process.env.SCORES365_TTL_FINISHED_SECONDS) || 86400
  * that returns `tvNetworks` — the games list carries just a `hasTVNetworks`
  * boolean — so a per-match channel is only obtainable through this call.
  */
-const game = (gameId, { timezoneName, finished = false } = {}) =>
+const game = (gameId, { timezoneName, langId, finished = false } = {}) =>
   get(
     '/game/',
-    { gameId, timezoneName, userCountryId: TV_COUNTRY_ID },
-    { ttl: finished ? TTL_FINISHED : TTL_LIVE }
+    { gameId, timezoneName, langId, userCountryId: TV_COUNTRY_ID },
+    { ttl: finished ? TTL_FINISHED : TTL_LIVE },
   );
 
-/** Every competition 365scores tracks, used to build the id map / catalogue. */
-const competitions = () => get('/competitions/', { sports: 1 });
+/**
+ * Every football competition 365scores tracks (about 800), used to build the
+ * id map / catalogue. `langId` picks the language of the names; without it the
+ * default applies, as before.
+ */
+const competitions = ({ langId } = {}) =>
+  get('/competitions/', { sports: 1, langId });
+
+/**
+ * Teams, competitions, players and countries whose name matches `query`, every
+ * sport mixed. The match is across languages — "real" finds "ريال مدريد" in
+ * Arabic and "ريال" finds "Real Madrid" in English — and the names come back
+ * in `langId`. Two letters are enough.
+ */
+const search = (query, { timezoneName, langId } = {}) =>
+  get('/search/', { query, timezoneName, langId }, { ttl: TTL_STATIC });
 
 module.exports = {
   Scores365Error,
+  resolveLangId,
   gamesOnDate,
   competitionFixtures,
   competitionResults,
@@ -270,4 +340,5 @@ module.exports = {
   stats,
   game,
   competitions,
+  search,
 };

@@ -8,7 +8,7 @@
 
 const client = require('../../utils/scores365/client');
 const shape = require('../../utils/scores365/normalize');
-const { to365Id, toExposedId } = require('../../utils/scores365/leagues');
+const { resolve365Id, toExposedId } = require('../../utils/scores365/leagues');
 
 const todayKey = () => new Date().toISOString().slice(0, 10);
 
@@ -61,34 +61,86 @@ const CUP_IDS = new Set([
 /**
  * A knockout STAGE name on any game also proves it, whatever the id.
  *
- * Matched in both languages so an unpinned cup is still recognised: the source
- * labels these "دور الـ 16" / "ربع النهائي" / "نصف النهائي" / "النهائي" under
- * Arabic, and "Round of 16" / "Quarter-Finals" / … under English.
+ * Matched in every language a consumer can ask for, so an unpinned cup is
+ * still recognised: "دور الـ 16" / "ربع النهائي" under Arabic, "Round of 16" /
+ * "Quarter Finals" under English. Most other languages' rounds contain "final"
+ * ("Cuartos de Final", "Achtelfinale", "Çeyrek Final"); the rest are spelled
+ * out as the source writes them — German "Zwischenrunde" for the round of 32,
+ * Turkish "16 Round" and "Yari Finaller", Indonesian "Babak 16" and
+ * "Putaran 32".
  */
-const KNOCKOUT_STAGE = /final|semi|quarter|round of|1\/8|1\/4|نهائي|دور ال/i;
+const KNOCKOUT_STAGE =
+  /final|semi|quarter|round of|1\/8|1\/4|نهائي|دور ال|zwischenrunde|\b16 round|son 32|yari f|babak 16|putaran 32/i;
 
 function looksLikeCup(exposedId, game) {
   if (CUP_IDS.has(Number(exposedId))) return true;
   return KNOCKOUT_STAGE.test(game.stageName || '');
 }
 
-/** All games on a date, normalized. */
-async function fixturesForDate(dateKey, timezoneName) {
+/**
+ * Competition names in English, by 365scores id; empty if the catalogue is
+ * unavailable.
+ *
+ * Consumers hide women's, youth, reserve and lower-division competitions from
+ * a day's list by NAME, and their patterns are written for English (and
+ * Arabic). Served in Spanish or Turkish, "Femenina" and "Kadınlar" would slip
+ * through and bury the list, so a day asked for in a language carries each
+ * competition's English name too. One catalogue request, cached like the rest.
+ */
+async function englishNames() {
+  try {
+    const body = await client.competitions({ langId: '1' });
+    return new Map((body.competitions || []).map((c) => [c.id, c.name]));
+  } catch {
+    return new Map();
+  }
+}
+
+/**
+ * All games on a date, normalized.
+ *
+ * With `withEnglishNames`, each league also carries `nameEn` (see
+ * `englishNames`). Only consumers that ask for a language get it, so the
+ * website's requests, which send none, cost exactly what they did.
+ */
+async function fixturesForDate(
+  dateKey,
+  timezoneName,
+  langId,
+  withEnglishNames,
+) {
   const isToday = dateKey === todayKey();
-  const feed = await client.gamesOnDate(dateKey, { isToday, timezoneName });
-  return (feed.games || []).map((g) => shape.fixture(g));
+  const [feed, english] = await Promise.all([
+    client.gamesOnDate(dateKey, { isToday, timezoneName, langId }),
+    withEnglishNames ? englishNames() : Promise.resolve(null),
+  ]);
+  return (feed.games || []).map((g) => {
+    const fixture = shape.fixture(g);
+    if (english) fixture.league.nameEn = english.get(g.competitionId) || null;
+    return fixture;
+  });
 }
 
 /**
  * Mirrors API-Football's `/fixtures`. Supported: date, live, league, team, id.
+ *
+ * `lang` selects the language of the names in the response. It is forwarded, not
+ * interpreted: every status, stage and event is classified from numeric ids or
+ * from patterns that match every language served, so switching it changes the
+ * text and nothing else. A day asked for in a language also carries each
+ * competition's English name (`league.nameEn`).
  */
 const getFixtures = async (params = {}) => {
   const timezoneName = params.timezoneName;
+  const langId = client.resolveLangId(params.lang || params.langId);
+  const withEnglishNames = Boolean(params.lang || params.langId);
 
   if (params.id || params.ids) {
     const one = await getFixtureById({
       id: params.id || params.ids,
       timezoneName,
+      lang: params.lang,
+      langId: params.langId,
     });
     return one && !one.error ? [one] : { error: 'Fixture not found' };
   }
@@ -101,14 +153,18 @@ const getFixtures = async (params = {}) => {
     const today = todayKey();
     const pages = await Promise.all(
       [shiftDate(today, -1), today].map((d) =>
-        fixturesForDate(d, timezoneName).catch(() => [])
-      )
+        fixturesForDate(d, timezoneName, langId, withEnglishNames).catch(
+          () => [],
+        ),
+      ),
     );
     fixtures = pages.flat().filter((f) => IN_PLAY.has(f.fixture.status.short));
   } else {
     fixtures = await fixturesForDate(
       String(params.date || todayKey()),
-      timezoneName
+      timezoneName,
+      langId,
+      withEnglishNames,
     );
   }
 
@@ -120,7 +176,8 @@ const getFixtures = async (params = {}) => {
     const wanted = String(params.team);
     fixtures = fixtures.filter(
       (f) =>
-        String(f.teams.home.id) === wanted || String(f.teams.away.id) === wanted
+        String(f.teams.home.id) === wanted ||
+        String(f.teams.away.id) === wanted,
     );
   }
 
@@ -131,7 +188,7 @@ const getFixtures = async (params = {}) => {
     return true;
   });
   fixtures.sort(
-    (a, b) => (a.fixture.timestamp || 0) - (b.fixture.timestamp || 0)
+    (a, b) => (a.fixture.timestamp || 0) - (b.fixture.timestamp || 0),
   );
 
   return fixtures.length > 0
@@ -146,8 +203,12 @@ const getFixtureById = async (params = {}) => {
 
   let detail;
   try {
-    detail = (await client.game(id, { timezoneName: params.timezoneName }))
-      .game;
+    detail = (
+      await client.game(id, {
+        timezoneName: params.timezoneName,
+        langId: client.resolveLangId(params.lang || params.langId),
+      })
+    ).game;
   } catch {
     detail = null;
   }
@@ -179,14 +240,17 @@ const getLeagueFixtures = async (params = {}) => {
   if (!Number.isFinite(exposedId)) {
     return { error: 'A numeric `league` id is required' };
   }
-  const compId = to365Id(exposedId);
+  const compId = await resolve365Id(exposedId);
   if (!compId) {
     return {
       error: `Competition ${exposedId} is not mapped for the 365scores source.`,
     };
   }
 
-  const opts = { timezoneName: params.timezoneName };
+  const opts = {
+    timezoneName: params.timezoneName,
+    langId: client.resolveLangId(params.lang || params.langId),
+  };
   const [resultsRes, fixturesRes] = await Promise.all([
     client.competitionResults(compId, opts).catch(() => ({ games: [] })),
     client.competitionFixtures(compId, opts).catch(() => ({ games: [] })),
@@ -209,7 +273,7 @@ const getLeagueFixtures = async (params = {}) => {
     fixtures.push(shape.fixture(g));
   }
   fixtures.sort(
-    (a, b) => (a.fixture.timestamp || 0) - (b.fixture.timestamp || 0)
+    (a, b) => (a.fixture.timestamp || 0) - (b.fixture.timestamp || 0),
   );
 
   return {

@@ -105,6 +105,8 @@ misconfigure this server, so check `/health` after changing it.
   - [Venues](#venues)
   - [Standings](#standings)
   - [Fixtures](#fixtures)
+  - [Search](#search)
+  - [Language (`lang`)](#language-lang)
   - [Players](#players)
 - [Status Codes](#status-codes)
 - [Support](#support)
@@ -219,6 +221,28 @@ misconfigure this server, so check `/health` after changing it.
   - Endpoint: `/fixtures/db/getPlayers`
   - Description: Retrieve player data from the database.
   - Method: `GET`
+
+### Search
+
+- **Search teams and competitions**
+  - Endpoint: `/search?q=real&lang=en`
+  - Description: Every football team and competition the 365scores source
+    tracks whose name matches `q` (two letters or more), most followed first.
+    The match works across scripts ("real" finds "ريال مدريد", "ريال" finds
+    "Real Madrid"). Competition ids are the same exposed ids the other routes
+    take; each team carries `leagueId`, its main competition. Other sources
+    answer 501.
+  - Method: `GET`
+
+### Language (`lang`)
+
+Fixtures, standings, scorers and search take `lang` (`en`, `ar`, `es`, `fr`,
+`de`, `it`, `pt`, `tr`, `id`; a full tag like `en-GB` works too) and name
+teams, competitions and stages in it. Without `lang` the names stay Arabic, as
+the website expects. Statuses, events and stages are classified the same in
+every language. A day of fixtures asked for with `lang` also gives each
+competition's English name as `league.nameEn`, for consumers that filter
+competitions by name.
 
 ### Players
 

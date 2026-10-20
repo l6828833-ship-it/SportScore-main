@@ -42,6 +42,55 @@ function athleteImage(id) {
 }
 
 /**
+ * Status text folded for matching: lower case, without Latin accents or Arabic
+ * vowel marks. "Ajourné" becomes "ajourne", Turkish "İptal" becomes "iptal"
+ * (JavaScript lower-cases "İ" to "i" plus a combining dot), and "متوقّف" loses
+ * its shadda — otherwise each needs its own spelling of every pattern. The
+ * hamza marks (U+0653-U+0655) are kept: they are part of letters like "أ",
+ * which NFD splits off and NFC puts back, so "تأجلت" still reads as written.
+ */
+function foldStatus(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f\u064b-\u0652\u0656-\u065f\u0670]/g, '')
+    .normalize('NFC');
+}
+
+/**
+ * The status words, in every language a consumer can ask for (see LANG_IDS in
+ * the client). Collected from the live feed by reading the same games in each
+ * language and lining them up against the English text, so each entry is what
+ * the source really writes: German "N. V." for after extra time, Spanish
+ * "Descanso" for half time, Arabic "الغيت" (no hamza) for cancelled and "شوط"
+ * alone for half time. Live extra time and a shootout in progress were not on
+ * the air while collecting; those use the usual words.
+ *
+ * Turkish reports a suspended game as "İptal Edildi", the same as a cancelled
+ * one, so there it reads as cancelled.
+ */
+const STATUS_WORDS = {
+  postponed:
+    /postpon|تأجل|مؤجل|aplazad|ajourn|verschoben|posticipat|adiad|ertelen|ditunda/,
+  cancelled: /cancel|ألغ|الغي|ملغا|annul|abgesagt|iptal|terhadang/,
+  suspended: /suspend|معلق|متوقف|eingestellt|sospes|interrompid|ditolak/,
+  abandoned: /aband|توقفت|أوقف|abgebrochen|abbandon/,
+  afterPenalties: /penalt|ركلات|جزاء|rigori|^n\.\s*e\.?$/,
+  afterExtraTime:
+    /after et|a\.e\.t|aet|إضاف|تمديد|tiempo extra|prorroga|^a\.\s*p\.?$|^n\.\s*v\.?$|dopo t\.\s*e|us sonras|setelah et/,
+  halfTime:
+    /half\s*time|halftime|\bht\b|الشوطين|استراحة|^شوط$|descanso|^mi-temps$|halbzeit|intervall?o|devre aras|istirahat/,
+  extraTime:
+    /extra|إضافي|التمديد|prorroga|prolongation|verlangerung|supplementar|uzatma|perpanjangan/,
+  penalties: /penalt|ركلات|جزاء|elfmeter|rigori|tirs au but/,
+  firstHalf:
+    /1st half|first half|الشوط الأول|primer tiempo|premiere mi-temps|erste halfte|primo tempo|primeiro tempo|ilk yar|babak pertama/,
+  secondHalf:
+    /2nd half|second half|الشوط الثاني|segundo tiempo|segundo tempo|deuxieme mi-temps|zweite halfte|secondo tempo|ikinci yar|babak kedua/,
+};
+
+/**
  * 365scores status -> API-Football short code.
  *
  * `statusGroup` is the reliable signal: 2 scheduled, 3 live, 4 finished. The
@@ -50,31 +99,39 @@ function athleteImage(id) {
  */
 function mapStatus(game) {
   const group = Number(game.statusGroup);
-  const text = String(game.statusText || game.shortStatusText || '')
-    .trim()
-    .toLowerCase();
+  const text = foldStatus(game.statusText || game.shortStatusText);
 
   // The abnormal states (postponed, cancelled, abandoned, suspended) share
   // statusGroup 4 with a normal "finished", so ONLY the text separates them —
-  // and the text is localized. With langId=27 it arrives in Arabic, so matching
-  // English alone silently let a postponed game ("تأجلت") fall through to "FT"
-  // and show as finished with a placeholder score. Match both languages.
-  if (/postpon|تأجل|مؤجل/.test(text)) return 'PST';
-  if (/cancel|ألغ|ملغا/.test(text)) return 'CANC';
-  if (/aband|توقف|أوقف/.test(text)) return 'ABD';
-  if (/suspend|معلّق|معلق/.test(text)) return 'SUSP';
+  // and the text is localized. Matching one language alone silently lets a
+  // postponed game fall through to "FT" and show as finished with a
+  // placeholder score, so every language's words are matched.
+  if (STATUS_WORDS.postponed.test(text)) return 'PST';
+  if (STATUS_WORDS.cancelled.test(text)) return 'CANC';
+  // Suspended before abandoned: the Arabic for suspended, "متوقف", contains
+  // the stem of "توقفت" (stopped for good).
+  if (STATUS_WORDS.suspended.test(text)) return 'SUSP';
+  if (STATUS_WORDS.abandoned.test(text)) return 'ABD';
 
   if (group === 4) {
-    if (/penalt|ركلات|جزاء/.test(text)) return 'PEN';
-    if (/after et|a\.e\.t|aet|بعد التمديد|وقت إضافي/.test(text)) return 'AET';
+    if (STATUS_WORDS.afterPenalties.test(text)) return 'PEN';
+    /**
+     * The Arabic alternatives are `إضاف` and `تمديد` as BARE STEMS, not whole
+     * words. The source writes "بعد الوقت الإضافي", where both nouns carry the
+     * definite article — so `وقت إضافي` never matched, and every World Cup
+     * knockout tie decided in extra time was reported as a plain "FT". Arabic
+     * attaches articles, prepositions and suffixes to the word, which is why a
+     * whole-word pattern lifted from the English side quietly under-matches.
+     */
+    if (STATUS_WORDS.afterExtraTime.test(text)) return 'AET';
     return 'FT';
   }
   if (group === 3) {
-    if (/half\s*time|halftime|\bht\b|الشوطين|بين الشوطين|استراحة/.test(text)) return 'HT';
-    if (/extra|إضافي|التمديد/.test(text)) return 'ET';
-    if (/penalt|ركلات|جزاء/.test(text)) return 'P';
-    if (/1st half|first half|الشوط الأول/.test(text)) return '1H';
-    if (/2nd half|second half|الشوط الثاني/.test(text)) return '2H';
+    if (STATUS_WORDS.halfTime.test(text)) return 'HT';
+    if (STATUS_WORDS.extraTime.test(text)) return 'ET';
+    if (STATUS_WORDS.penalties.test(text)) return 'P';
+    if (STATUS_WORDS.firstHalf.test(text)) return '1H';
+    if (STATUS_WORDS.secondHalf.test(text)) return '2H';
     return 'LIVE';
   }
   return 'NS';
@@ -119,7 +176,9 @@ function team(competitor) {
  * normalizing them is a display decision and belongs in the consumer.
  */
 function tvChannels(game) {
-  const networks = Array.isArray(game && game.tvNetworks) ? game.tvNetworks : [];
+  const networks = Array.isArray(game && game.tvNetworks)
+    ? game.tvNetworks
+    : [];
   const names = networks
     .map((n) => (n && typeof n.name === 'string' ? n.name.trim() : ''))
     .filter(Boolean);
@@ -234,7 +293,7 @@ function fixture(game) {
 function halftimeFromStages(game) {
   const stages = Array.isArray(game.stages) ? game.stages : [];
   const ht = stages.find((s) =>
-    /halftime|half time|\bht\b/i.test(s.name || s.shortName || '')
+    /halftime|half time|\bht\b/i.test(s.name || s.shortName || ''),
   );
   if (!ht) return { home: null, away: null };
   return {
@@ -289,7 +348,8 @@ function classifyEvent(eventType) {
 
   switch (typeId) {
     case EVENT_TYPE_GOAL: {
-      const own = subTypeId === GOAL_SUBTYPE_OWN || /own|عكس|ذاتي/i.test(subtype);
+      const own =
+        subTypeId === GOAL_SUBTYPE_OWN || /own|عكس|ذاتي/i.test(subtype);
       const penalty =
         subTypeId === GOAL_SUBTYPE_PENALTY || /penalt|جزاء/i.test(subtype);
       return {
@@ -303,7 +363,8 @@ function classifyEvent(eventType) {
       return {
         type: 'Card',
         detail:
-          subTypeId === RED_SUBTYPE_SECOND_YELLOW || /second|ثانية/i.test(subtype)
+          subTypeId === RED_SUBTYPE_SECOND_YELLOW ||
+          /second|ثانية/i.test(subtype)
             ? 'Second Yellow card'
             : 'Red Card',
       };
@@ -325,7 +386,7 @@ function classifyEvent(eventType) {
  */
 function events(game) {
   const members = new Map(
-    (game.members || []).map((m) => [m.id, m.name || m.shortName || null])
+    (game.members || []).map((m) => [m.id, m.name || m.shortName || null]),
   );
   /**
    * Which team each player actually belongs to.
@@ -345,7 +406,7 @@ function events(game) {
   const playerTeam = new Map(
     (game.members || [])
       .filter((m) => m && m.id != null && m.competitorId != null)
-      .map((m) => [m.id, m.competitorId])
+      .map((m) => [m.id, m.competitorId]),
   );
   const homeId = game.homeCompetitor && game.homeCompetitor.id;
   const out = [];

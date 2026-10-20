@@ -185,6 +185,40 @@ function to365Id(apiFootballId) {
   return null;
 }
 
+/**
+ * As `to365Id`, and for a derived id nothing has resolved yet, by asking the
+ * catalogue: every football competition 365scores tracks is hashed until one
+ * gives the id back.
+ *
+ * Why this is needed: a competition found by SEARCH, or followed in the app
+ * while one server instance was up, is requested again later on another
+ * instance or after a cold start — Cloud Run scales to zero. That process has
+ * never seen the competition in a payload, so `to365Id` alone answers null and
+ * the league page comes up blank. The catalogue is one cached request.
+ */
+async function resolve365Id(exposedId) {
+  const id = Number(exposedId);
+  const known = to365Id(id);
+  if (known || !(id >= UNMAPPED_BASE && id < UNMAPPED_BASE + 100000))
+    return known;
+  let catalogue = [];
+  try {
+    // Required here rather than at the top: the client does not depend on this
+    // module, and keeping it that way keeps the two free of a require cycle.
+    const client = require('./client');
+    catalogue = (await client.competitions()).competitions || [];
+  } catch {
+    return null;
+  }
+  for (const competition of catalogue) {
+    if (derivedIdFor(competition.id) === id) {
+      DERIVED_TO_365.set(id, Number(competition.id));
+      return Number(competition.id);
+    }
+  }
+  return null;
+}
+
 /** Whether an exposed id maps to a real 365scores competition we can query. */
 function isSupported(apiFootballId) {
   return TO_365.has(Number(apiFootballId));
@@ -196,6 +230,7 @@ module.exports = {
   KNOWN_365_IDS,
   toExposedId,
   to365Id,
+  resolve365Id,
   isSupported,
   stableId,
   UNMAPPED_BASE,

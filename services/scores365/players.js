@@ -13,7 +13,7 @@
 
 const client = require('../../utils/scores365/client');
 const nz = require('../../utils/scores365/normalize');
-const { to365Id } = require('../../utils/scores365/leagues');
+const { resolve365Id } = require('../../utils/scores365/leagues');
 
 /**
  * Competitions whose `/stats` leaderboard MERGES qualifying-round goals with the
@@ -98,7 +98,7 @@ function primaryValue(row, typeId) {
  */
 function penalties(row) {
   const pen = (row.stats || []).find(
-    (s) => Number(s.typeId) === STAT_TYPE_PENALTY_GOALS
+    (s) => Number(s.typeId) === STAT_TYPE_PENALTY_GOALS,
   );
   if (pen) return nz.num(pen.value);
   const m = /:\s*(\d+)\s*$/.exec(row.secondaryStatName || '');
@@ -114,7 +114,10 @@ function penalties(row) {
 async function scorersFromStats(compId, params) {
   let body;
   try {
-    body = await client.stats(compId, { timezoneName: params.timezoneName });
+    body = await client.stats(compId, {
+      timezoneName: params.timezoneName,
+      langId: client.resolveLangId(params.lang || params.langId),
+    });
   } catch {
     return { error: 'Empty data after multiple attempts' };
   }
@@ -178,7 +181,10 @@ async function scorersFromStats(compId, params) {
  * players the raw stats return.
  */
 async function scorersFromFixtures(compId, params) {
-  const opts = { timezoneName: params.timezoneName };
+  const opts = {
+    timezoneName: params.timezoneName,
+    langId: client.resolveLangId(params.lang || params.langId),
+  };
   // Every game read below is already finished, so its detail is cached for a
   // day rather than the 30s live TTL. Without this the whole season's games are
   // re-fetched every half minute and the fan-out grows past the caller's
@@ -242,7 +248,7 @@ async function scorersFromFixtures(compId, params) {
     }
   };
   await Promise.all(
-    Array.from({ length: Math.min(CONCURRENCY, finished.length) }, worker)
+    Array.from({ length: Math.min(CONCURRENCY, finished.length) }, worker),
   );
 
   const ranked = [...tally.values()]
@@ -251,7 +257,7 @@ async function scorersFromFixtures(compId, params) {
       (a, b) =>
         b.goals - a.goals ||
         b.assists - a.assists ||
-        (a.name || '').localeCompare(b.name || '')
+        (a.name || '').localeCompare(b.name || ''),
     )
     .slice(0, SCORER_LIMIT);
 
@@ -290,7 +296,7 @@ async function scorersFromFixtures(compId, params) {
 
 const getTopScorers = async (params = {}) => {
   const exposedId = Number(params.league);
-  const compId = to365Id(exposedId);
+  const compId = await resolve365Id(exposedId);
   if (!compId) {
     return {
       error: `No scorer data for competition "${params.league}" on 365scores.`,
@@ -304,7 +310,7 @@ const getTopScorers = async (params = {}) => {
 
 const notSupported = (what) => async () => {
   const error = new Error(
-    `${what} are not available from the 365scores source. Use SOURCE=apifootball with a key.`
+    `${what} are not available from the 365scores source. Use SOURCE=apifootball with a key.`,
   );
   error.status = 501;
   throw error;

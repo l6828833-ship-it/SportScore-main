@@ -8,11 +8,11 @@
 
 const client = require('../../utils/scores365/client');
 const nz = require('../../utils/scores365/normalize');
-const { to365Id } = require('../../utils/scores365/leagues');
+const { resolve365Id } = require('../../utils/scores365/leagues');
 
 const getStandings = async (params = {}) => {
   const exposedId = Number(params.league);
-  const compId = to365Id(exposedId);
+  const compId = await resolve365Id(exposedId);
   if (!compId) {
     return {
       error: `No table available for competition "${params.league}" on 365scores.`,
@@ -23,6 +23,7 @@ const getStandings = async (params = {}) => {
   try {
     body = await client.standings(compId, {
       timezoneName: params.timezoneName,
+      langId: client.resolveLangId(params.lang || params.langId),
     });
   } catch {
     return { error: 'Empty data after multiple attempts' };
@@ -55,10 +56,10 @@ const getStandings = async (params = {}) => {
     const labels = new Map(
       (Array.isArray(stage.groups) ? stage.groups : [])
         .filter((g) => g && g.num != null)
-        .map((g) => [Number(g.num), g.name || null])
+        .map((g) => [Number(g.num), g.name || null]),
     );
     const distinctGroups = new Set(
-      rows.map((r) => r.groupNum).filter((n) => n != null)
+      rows.map((r) => r.groupNum).filter((n) => n != null),
     );
     const stageLabel = multiStage
       ? stage.displayName || stage.name || null
