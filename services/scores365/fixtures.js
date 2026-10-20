@@ -301,7 +301,8 @@ const getLeagueFixtures = async (params = {}) => {
     langId: client.resolveLangId(params.lang || params.langId),
   };
   const [resultsRes, fixturesRes] = await Promise.all([
-    client.competitionResults(compId, opts).catch(() => ({ games: [] })),
+    // The whole season, not the first page; see competitionSeasonResults.
+    client.competitionSeasonResults(compId, opts).catch(() => ({ games: [] })),
     client.competitionFixtures(compId, opts).catch(() => ({ games: [] })),
   ]);
 

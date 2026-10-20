@@ -320,6 +320,79 @@ const competitionResults = (competitionId, { timezoneName, langId } = {}) =>
     { expect: 'games' },
   );
 
+/** Most pages of results `competitionSeasonResults` reads: a 16-team season. */
+const MAX_RESULT_PAGES = Number(process.env.SCORES365_MAX_RESULT_PAGES) || 16;
+
+/**
+ * Every result of a competition's CURRENT season, newest first.
+ *
+ * `/games/results` is paged: one call returns only the latest ~16 games, with
+ * a `paging.previousPage` link to the ones before. Reading just the first page
+ * dropped everything older — two rounds into a season, a team page showed two
+ * results beside a table that counted three played, and the missing one was
+ * often the win. This follows the links back until the season changes (or
+ * there are no more pages), so the results agree with the table.
+ *
+ * Older pages never change, so each is cached on its own for the static TTL
+ * and a refresh normally costs only the first page.
+ */
+async function competitionSeasonResults(
+  competitionId,
+  { timezoneName, langId } = {},
+) {
+  const first = await competitionResults(competitionId, {
+    timezoneName,
+    langId,
+  });
+  const games = [...(first.games || [])];
+  const season = games.length ? games[0].seasonNum : null;
+  let link = first.paging && first.paging.previousPage;
+  for (let page = 1; link && page < MAX_RESULT_PAGES; page += 1) {
+    if (games.some((g) => g.seasonNum !== season)) break;
+    const params = pageParams(link);
+    if (!params) break;
+    let body;
+    try {
+      body = await get('/games/', { ...params, timezoneName, langId });
+    } catch {
+      break; // Keep what has been read; a missing old page is not an outage.
+    }
+    const older = body.games || [];
+    if (older.length === 0) break;
+    games.push(...older);
+    link = body.paging && body.paging.previousPage;
+  }
+  return {
+    ...first,
+    games: season == null ? games : games.filter((g) => g.seasonNum === season),
+  };
+}
+
+/**
+ * The query of a 365scores paging link ("/web/games/?…&aftergame=…"), minus
+ * the language, region and time zone it was issued for — `get` puts the
+ * caller's own back.
+ */
+function pageParams(link) {
+  try {
+    const url = new URL(link, 'https://webws.365scores.com');
+    const params = Object.fromEntries(url.searchParams);
+    for (const k of [
+      'langId',
+      'timezoneId',
+      'timezoneName',
+      'userCountryId',
+      'apptype',
+      'appTypeId',
+    ]) {
+      delete params[k];
+    }
+    return params.aftergame ? params : null;
+  } catch {
+    return null;
+  }
+}
+
 /** League table for a competition. */
 const standings = (competitionId, { timezoneName, langId } = {}) =>
   get(
@@ -389,6 +462,7 @@ module.exports = {
   gamesOnDate,
   competitionFixtures,
   competitionResults,
+  competitionSeasonResults,
   standings,
   stats,
   game,
