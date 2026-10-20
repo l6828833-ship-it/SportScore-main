@@ -151,6 +151,8 @@ function team(competitor) {
     id: num(competitor.id),
     name: competitor.name || competitor.shortName || null,
     logo: competitorLogo(competitor.id),
+    // Sendings-off so far; the list carries no other card counts.
+    redCards: num(competitor.redCards) ?? 0,
     winner:
       competitor.isWinner === true
         ? true
@@ -319,6 +321,8 @@ function halftimeFromStages(game) {
  *
  *   eventType.id  1 Goal   2 Yellow Card   3 Red Card
  *                 6 Penalty Miss   11 Goal Disallowed (VAR)   12 Woodwork
+ *                 1000 Substitution (playerId came on, extraPlayers[0] went
+ *                 off — checked against the line-ups' Starting/Substitute)
  *   subTypeId (on a Goal)  1 Field Goal   2 Own Goal   3 Penalty
  *
  * Note 11 (Goal Disallowed) is its own type, so an id test cannot mistake a
@@ -329,6 +333,7 @@ const EVENT_TYPE_YELLOW = 2;
 const EVENT_TYPE_RED = 3;
 const EVENT_TYPE_PENALTY_MISS = 6;
 const EVENT_TYPE_GOAL_DISALLOWED = 11;
+const EVENT_TYPE_SUBSTITUTION = 1000;
 const GOAL_SUBTYPE_OWN = 2;
 const GOAL_SUBTYPE_PENALTY = 3;
 /** A red card shown for a second bookable offence rather than straight. */
@@ -377,6 +382,10 @@ function classifyEvent(eventType) {
       return { type: 'Missed Penalty', detail: 'Missed Penalty' };
     case EVENT_TYPE_GOAL_DISALLOWED:
       return { type: 'Var', detail: 'Goal Disallowed' };
+    // API-Football's spelling. Consumers that do not show substitutions (the
+    // website, the leaderboards) skip a type they do not know.
+    case EVENT_TYPE_SUBSTITUTION:
+      return { type: 'subst', detail: 'Substitution' };
     default:
       return null;
   }
@@ -442,10 +451,12 @@ function events(game) {
     // are the same team.
     const teamId = playerTeam.get(ev.playerId) ?? ev.competitorId;
     const isHome = teamId === homeId;
-    // Only a goal carries an assister here; on a card the extra player slot is
-    // either empty or unrelated, so it is read for goals alone.
+    // A goal's extra player is the assister; a substitution's is the player
+    // who went off (`player` is the one who came on). On a card the slot is
+    // empty or unrelated, so it is read for those two alone.
     const assistId =
-      kind.type === 'Goal' && Array.isArray(ev.extraPlayers)
+      (kind.type === 'Goal' || kind.type === 'subst') &&
+      Array.isArray(ev.extraPlayers)
         ? ev.extraPlayers[0]
         : null;
 

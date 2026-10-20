@@ -234,7 +234,9 @@ async function scorersFromFixtures(compId, params) {
         continue; // upstream hiccup on one game must not drop the board
       }
       for (const ev of nz.events(detail)) {
-        if (!ev.player.id) continue;
+        // The events carry cards, missed penalties and substitutions too; only
+        // a goal is a goal. Without this check every booking counted as one.
+        if (ev.type !== 'Goal' || !ev.player.id) continue;
         const scorer = ensure(ev.player.id, ev.player.name, ev.team.id);
         if (ev.detail === 'Own Goal') {
           // An own goal counts for neither the scorer's tally nor a top-scorer.

@@ -26,8 +26,9 @@ const guarded = (run) => async (req, res) => {
   }
 };
 
-// POST /notify/tick — one check for kick-offs, goals and results.
-const tick = guarded(() => alerts.tick());
+// POST /notify/tick — checks every 10 s for ~40 s (one scheduler call);
+// `?once=1` runs a single check.
+const tick = guarded((req) => (req.query.once ? alerts.tick() : alerts.run()));
 
 // POST /notify/test?topic=team_104&type=goal — one sample alert.
 const test = guarded((req) =>
