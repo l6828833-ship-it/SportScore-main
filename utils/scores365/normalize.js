@@ -228,7 +228,12 @@ function fixture(game) {
         ? {
             id: null,
             name: game.venue.name || null,
-            city: game.venue.shortName || null,
+            // The source has no city; its `shortName` is usually the name as a
+            // URL slug ("stade-bollaert-delelis"), which is not one either.
+            city:
+              game.venue.shortName && !/^[a-z0-9-]+$/.test(game.venue.shortName)
+                ? game.venue.shortName
+                : null,
           }
         : { id: null, name: null, city: null },
       status: {
@@ -389,6 +394,23 @@ function events(game) {
     (game.members || []).map((m) => [m.id, m.name || m.shortName || null]),
   );
   /**
+   * The athlete behind each lineup entry.
+   *
+   * An event's `playerId` is a `members[].id`, which identifies a player IN
+   * THIS GAME only — a new one every match. Photos live under the athlete id
+   * (`members[].athleteId`), and so does the player across games. Reporting
+   * the member id meant every leaderboard built from match events (the
+   * Champions League's, for one) showed initials instead of photos, since
+   * `/Athletes/{memberId}` is a 404. Fall back to the member id only when the
+   * lineup does not say.
+   */
+  const athletes = new Map(
+    (game.members || [])
+      .filter((m) => m && m.id != null && m.athleteId != null)
+      .map((m) => [m.id, m.athleteId]),
+  );
+  const athlete = (memberId) => num(athletes.get(memberId) ?? memberId);
+  /**
    * Which team each player actually belongs to.
    *
    * Needed because of own goals. This source attributes an own-goal event to the
@@ -434,9 +456,12 @@ function events(game) {
         name: null,
         logo: competitorLogo(teamId),
       },
-      player: { id: num(ev.playerId), name: members.get(ev.playerId) || null },
+      player: {
+        id: athlete(ev.playerId),
+        name: members.get(ev.playerId) || null,
+      },
       assist: assistId
-        ? { id: num(assistId), name: members.get(assistId) || null }
+        ? { id: athlete(assistId), name: members.get(assistId) || null }
         : { id: null, name: null },
       type: kind.type,
       detail: kind.detail,

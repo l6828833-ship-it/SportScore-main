@@ -97,6 +97,20 @@ async function englishNames() {
 }
 
 /**
+ * Tells a client how old a game in play is: `status.ageMs`, the time since
+ * 365scores produced it, through every cache on the way. The app starts its
+ * running clock from when a minute turned, so it needs to know when the feed
+ * SAW the turn, not when the copy arrived. Relative rather than a timestamp,
+ * so the phone's clock being off does not matter. In-play games only.
+ */
+function withAge(fixture, asOf) {
+  if (asOf > 0 && IN_PLAY.has(fixture.fixture.status.short)) {
+    fixture.fixture.status.ageMs = Math.max(0, Date.now() - asOf);
+  }
+  return fixture;
+}
+
+/**
  * All games on a date, normalized.
  *
  * With `withEnglishNames`, each league also carries `nameEn` (see
@@ -108,15 +122,30 @@ async function fixturesForDate(
   timezoneName,
   langId,
   withEnglishNames,
+  maxAge,
 ) {
-  const isToday = dateKey === todayKey();
+  // Yesterday is still live in the small hours: an evening kick-off in the
+  // Americas is in play past midnight UTC, and on the 15-minute cache of a
+  // settled day its goals would arrive a quarter of an hour late.
+  const isToday =
+    dateKey === todayKey() ||
+    (dateKey === shiftDate(todayKey(), -1) && new Date().getUTCHours() < 6);
   const [feed, english] = await Promise.all([
-    client.gamesOnDate(dateKey, { isToday, timezoneName, langId }),
+    client.gamesOnDate(dateKey, {
+      isToday,
+      timezoneName,
+      langId,
+      // A settled day has nothing in play to keep fresh.
+      maxAge: isToday ? maxAge : undefined,
+    }),
     withEnglishNames ? englishNames() : Promise.resolve(null),
   ]);
   return (feed.games || []).map((g) => {
     const fixture = shape.fixture(g);
     if (english) fixture.league.nameEn = english.get(g.competitionId) || null;
+    // 365scores flags a game for a few minutes after the final whistle.
+    if (g.justEnded) fixture.fixture.status.justEnded = true;
+    withAge(fixture, feed._asOf);
     return fixture;
   });
 }
@@ -153,12 +182,29 @@ const getFixtures = async (params = {}) => {
     const today = todayKey();
     const pages = await Promise.all(
       [shiftDate(today, -1), today].map((d) =>
-        fixturesForDate(d, timezoneName, langId, withEnglishNames).catch(
-          () => [],
-        ),
+        fixturesForDate(
+          d,
+          timezoneName,
+          langId,
+          withEnglishNames,
+          client.LIVE_MAX_AGE,
+        ).catch(() => []),
       ),
     );
-    fixtures = pages.flat().filter((f) => IN_PLAY.has(f.fixture.status.short));
+    /**
+     * Games that have just ended are kept too, with their final status. A
+     * reader following a match live learns from the live feed that it is
+     * over, at the live feed's freshness — instead of from the match dropping
+     * out of it, which sent the app to the whole day's list (cached longer)
+     * and left the match showing "live", clock running, for half a minute
+     * after the whistle.
+     */
+    fixtures = pages
+      .flat()
+      .filter(
+        (f) =>
+          IN_PLAY.has(f.fixture.status.short) || f.fixture.status.justEnded,
+      );
   } else {
     fixtures = await fixturesForDate(
       String(params.date || todayKey()),
@@ -202,19 +248,22 @@ const getFixtureById = async (params = {}) => {
   if (!id) return { error: 'An `id` query parameter is required' };
 
   let detail;
+  let asOf;
   try {
-    detail = (
-      await client.game(id, {
-        timezoneName: params.timezoneName,
-        langId: client.resolveLangId(params.lang || params.langId),
-      })
-    ).game;
+    const payload = await client.game(id, {
+      timezoneName: params.timezoneName,
+      langId: client.resolveLangId(params.lang || params.langId),
+      // Read while it is being followed live; see LIVE_MAX_AGE.
+      maxAge: client.LIVE_MAX_AGE,
+    });
+    detail = payload.game;
+    asOf = payload._asOf;
   } catch {
     detail = null;
   }
   if (!detail) return { error: 'Fixture not found' };
 
-  const base = shape.fixture(detail);
+  const base = withAge(shape.fixture(detail), asOf);
   return {
     ...base,
     events: shape.events(detail),

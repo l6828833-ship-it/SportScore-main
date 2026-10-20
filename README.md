@@ -25,7 +25,7 @@ own JavaScript consumes.
 ```bash
 curl "localhost:4000/fixtures/getFixtures"                   # today, all competitions
 curl "localhost:4000/fixtures/getFixtures?date=2026-09-08"
-curl "localhost:4000/fixtures/getFixtures?live=all"
+curl "localhost:4000/fixtures/getFixtures?live=all"           # in play + just ended; at most 5 s old
 curl "localhost:4000/fixtures/getFixtureById?id=401879291"    # + events & statistics
 curl "localhost:4000/standings/getStandings?league=39"
 curl "localhost:4000/leagues/getLeagues"
@@ -106,6 +106,7 @@ misconfigure this server, so check `/health` after changing it.
   - [Standings](#standings)
   - [Fixtures](#fixtures)
   - [Search](#search)
+  - [Match alerts (`/notify`)](#match-alerts-notify)
   - [Language (`lang`)](#language-lang)
   - [Players](#players)
 - [Status Codes](#status-codes)
@@ -233,6 +234,29 @@ misconfigure this server, so check `/health` after changing it.
     take; each team carries `leagueId`, its main competition. Other sources
     answer 501.
   - Method: `GET`
+
+### Match alerts (`/notify`)
+
+Push notifications for the Android app, through Firebase Cloud Messaging:
+kick-off, goals, half-time and full-time for every match in play, sent to the
+topics `team_{id}` (both teams) and `league_{id}`, which the app subscribes to
+for what the reader follows.
+
+- **Check for changes**
+  - Endpoint: `POST /notify/tick`, called every minute by Cloud Scheduler.
+  - Compares every match in play with the previous check (one Firestore
+    document, `notifier/live`) and sends a data message per change. The first
+    check after a pause of more than ten minutes only records what is going on.
+- **Send a sample**
+  - Endpoint: `POST /notify/test?topic=team_104&type=goal`
+- Both need the header `X-Notify-Key` equal to `NOTIFY_KEY`; without
+  `NOTIFY_KEY` set the routes answer 404.
+- Environment: `NOTIFY_KEY`, `FCM_PROJECT_ID` (the Firebase project), and
+  optionally `NOTIFY_STATE_PROJECT` (where the Firestore state lives; defaults
+  to `FCM_PROJECT_ID`) or `NOTIFY_STATE=memory` for a local run. On Cloud Run
+  the service account needs *Firebase Cloud Messaging API Admin* and *Cloud
+  Datastore User* on that project. Locally, set `GOOGLE_OAUTH_ACCESS_TOKEN`
+  (`gcloud auth print-access-token`).
 
 ### Language (`lang`)
 

@@ -30,6 +30,13 @@ const BASE =
 
 const TTL_LIVE = Number(process.env.SCORES365_TTL_LIVE_SECONDS) || 30;
 const TTL_STATIC = Number(process.env.SCORES365_TTL_SECONDS) || 900;
+/**
+ * How stale a live read may be. The app polls a match in play every 10 s and
+ * runs its seconds clock from the moment the minute changes, so a 30-second
+ * cached copy would put that clock up to half a minute behind. Only the live
+ * reads ask for this; the website's day pages keep the 30-second cache.
+ */
+const LIVE_MAX_AGE = Number(process.env.SCORES365_LIVE_MAX_AGE_SECONDS) || 5;
 const TIMEOUT_MS = Number(process.env.UPSTREAM_TIMEOUT_MS) || 15000;
 
 const APP_TYPE_ID = process.env.SCORES365_APP_TYPE_ID || '5';
@@ -185,13 +192,40 @@ function request(path, query, acceptEncoding) {
  * @param expect Name of an array the payload must contain a non-empty value for.
  *   When it comes back missing or empty, the request is retried UNCOMPRESSED —
  *   see below for why that is not as silly as it looks.
+ * @param maxAge Seconds. A cached copy older than this is refetched although
+ *   its `ttl` has not run out: for a caller that needs a resource fresher than
+ *   its other readers do (see `LIVE_MAX_AGE`), without shortening the cache
+ *   for all of them.
  */
-async function get(path, params = {}, { ttl = TTL_STATIC, expect } = {}) {
+async function get(
+  path,
+  params = {},
+  { ttl = TTL_STATIC, expect, maxAge } = {},
+) {
   const query = withCommon(params);
   const cacheKey = keyFor(path, query);
   const hit = cache.get(cacheKey);
-  if (hit) return hit;
+  if (hit && !(maxAge > 0 && Date.now() - hit.at > maxAge * 1000)) {
+    return hit.data;
+  }
+  // Callers that arrive together share one upstream call.
+  if (inFlight.has(cacheKey)) return inFlight.get(cacheKey);
+  const pending = fetchAndCache(path, query, cacheKey, ttl, expect);
+  inFlight.set(cacheKey, pending);
+  try {
+    return await pending;
+  } finally {
+    inFlight.delete(cacheKey);
+  }
+}
 
+/**
+ * Requests to 365scores in progress, by cache key, so that the readers of a
+ * resource that expire together do not each make their own call.
+ */
+const inFlight = new Map();
+
+async function fetchAndCache(path, query, cacheKey, ttl, expect) {
   let response;
   try {
     response = await request(path, query, 'gzip, deflate, br');
@@ -227,7 +261,18 @@ async function get(path, params = {}, { ttl = TTL_STATIC, expect } = {}) {
     );
   }
 
-  cache.set(cacheKey, response.data, ttl);
+  /**
+   * When 365scores produced this copy. Their CDN serves the same answer for
+   * up to 12 s (`Cache-Control: max-age=12`) and says how old it is in `Age`,
+   * so "now" is not the answer's time. Kept on the payload as `_asOf` (epoch
+   * ms) so a live reader can tell its clients how old the score is.
+   */
+  const age = Number(response.headers && response.headers.age) || 0;
+  const asOf = Date.now() - age * 1000;
+  if (response.data && typeof response.data === 'object') {
+    response.data._asOf = asOf;
+  }
+  cache.set(cacheKey, { data: response.data, at: asOf }, ttl);
   return response.data;
 }
 
@@ -247,12 +292,15 @@ const toApiDate = (dateKey) => {
  * dated `allscores` call returns exactly the requested day, in full. Today's
  * request still gets the short live TTL so scores stay fresh.
  */
-const gamesOnDate = (dateKey, { isToday, timezoneName, langId } = {}) => {
+const gamesOnDate = (
+  dateKey,
+  { isToday, timezoneName, langId, maxAge } = {},
+) => {
   const date = toApiDate(dateKey);
   return get(
     '/games/allscores/',
     { sports: 1, startDate: date, endDate: date, timezoneName, langId },
-    { ttl: isToday ? TTL_LIVE : TTL_STATIC, expect: 'games' },
+    { ttl: isToday ? TTL_LIVE : TTL_STATIC, expect: 'games', maxAge },
   );
 };
 
@@ -300,17 +348,21 @@ const TTL_FINISHED =
 /**
  * One game with events, lineups, venue and TV networks. Short TTL by default:
  * it may be live. Pass `finished: true` for a game that has already ended to
- * cache it for a day instead.
+ * cache it for a day instead, or `maxAge` for a reader that is following it
+ * live.
  *
  * `userCountryId` is overridden to the TV region here. This is the only endpoint
  * that returns `tvNetworks` — the games list carries just a `hasTVNetworks`
  * boolean — so a per-match channel is only obtainable through this call.
  */
-const game = (gameId, { timezoneName, langId, finished = false } = {}) =>
+const game = (
+  gameId,
+  { timezoneName, langId, finished = false, maxAge } = {},
+) =>
   get(
     '/game/',
     { gameId, timezoneName, langId, userCountryId: TV_COUNTRY_ID },
-    { ttl: finished ? TTL_FINISHED : TTL_LIVE },
+    { ttl: finished ? TTL_FINISHED : TTL_LIVE, maxAge },
   );
 
 /**
@@ -332,6 +384,7 @@ const search = (query, { timezoneName, langId } = {}) =>
 
 module.exports = {
   Scores365Error,
+  LIVE_MAX_AGE,
   resolveLangId,
   gamesOnDate,
   competitionFixtures,

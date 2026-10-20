@@ -61,6 +61,7 @@ const playersRoutes = require('./routes/players');
 const predictionsRoutes = require('./routes/predictions');
 const newsRoutes = require('./routes/news');
 const searchRoutes = require('./routes/search');
+const notifyRoutes = require('./routes/notify');
 
 // Connect to the database if one is configured. Optional by design.
 initDb();
@@ -75,6 +76,7 @@ app.use('/players', playersRoutes);
 app.use('/predictions', predictionsRoutes);
 app.use('/news', newsRoutes);
 app.use('/search', searchRoutes);
+app.use('/notify', notifyRoutes);
 
 /**
  * Readiness probe. Consumers use this to tell "backend is down" apart from
