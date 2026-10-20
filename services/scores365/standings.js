@@ -75,7 +75,7 @@ const getStandings = async (params = {}) => {
         // than an unlocalized label, and every payload seen so far names them.
         groupName = labels.get(Number(row.groupNum)) || `Group ${row.groupNum}`;
       }
-      allRows.push(nz.standingRow(row, groupName));
+      allRows.push(nz.standingRow(row, groupName, stage.destinations));
     }
   }
 

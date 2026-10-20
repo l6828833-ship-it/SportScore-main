@@ -495,7 +495,41 @@ function events(game) {
  * One standings row -> API-Football standings row.
  * `groupName` labels multi-group tables (cups); null for a single league table.
  */
-function standingRow(row, groupName) {
+/**
+ * What a table position leads to — qualification, a play-off, relegation —
+ * from the stage's `destinations`, which each row points into with
+ * `destinationNum`: name in the request's language, the source's colour, and
+ * a language-independent `kind`. API-Football puts this in `description`,
+ * which is filled too, for clients that read that.
+ */
+const ZONE_KINDS = {
+  2: 'next-round',
+  3: 'relegation',
+  4: 'promotion',
+  5: 'relegation-playoff',
+  6: 'promotion-playoff',
+  7: 'playoff',
+  8: 'top-continental',
+  9: 'continental',
+  10: 'continental',
+};
+
+function zoneFor(row, destinations) {
+  if (!row || row.destinationNum == null || !Array.isArray(destinations)) {
+    return null;
+  }
+  const d = destinations.find((x) => x && x.num === row.destinationNum);
+  if (!d) return null;
+  return {
+    num: d.num,
+    name: d.name || d.guaranteedText || null,
+    color: /^#[0-9a-f]{6}$/i.test(d.color || '') ? d.color : null,
+    kind: ZONE_KINDS[d.type] || 'other',
+  };
+}
+
+function standingRow(row, groupName, destinations) {
+  const zone = zoneFor(row, destinations);
   const c = row.competitor || {};
   const gf = num(row.for);
   const ga = num(row.against);
@@ -511,8 +545,8 @@ function standingRow(row, groupName) {
     group: groupName,
     form: null,
     status: null,
-    // 365scores does not label qualification zones in this payload, so no band.
-    description: null,
+    description: zone ? zone.name : null,
+    zone,
     all: {
       played: num(row.gamePlayed),
       win: num(row.gamesWon),
