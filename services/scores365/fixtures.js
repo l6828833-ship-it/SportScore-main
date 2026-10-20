@@ -170,6 +170,7 @@ const getFixtures = async (params = {}) => {
       timezoneName,
       lang: params.lang,
       langId: params.langId,
+      country: params.country,
     });
     return one && !one.error ? [one] : { error: 'Fixture not found' };
   }
@@ -249,8 +250,18 @@ const getFixtureById = async (params = {}) => {
 
   let detail;
   let asOf;
+  /**
+   * Broadcasters are per country: `country` (ISO, "PT") asks for the
+   * reader's own channels. Without it — the website — the default TV region.
+   * A country with no known channels for the match gets none, rather than
+   * another country's: beIN in Saudi Arabia means nothing in Portugal.
+   */
+  const tvCountryId = await client
+    .countryIdFor(params.country)
+    .catch(() => null);
   try {
     const payload = await client.game(id, {
+      tvCountryId,
       timezoneName: params.timezoneName,
       langId: client.resolveLangId(params.lang || params.langId),
       // Read while it is being followed live; see LIVE_MAX_AGE.

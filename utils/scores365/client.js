@@ -430,13 +430,83 @@ const TTL_FINISHED =
  */
 const game = (
   gameId,
-  { timezoneName, langId, finished = false, maxAge } = {},
+  { timezoneName, langId, finished = false, maxAge, tvCountryId } = {},
 ) =>
   get(
     '/game/',
-    { gameId, timezoneName, langId, userCountryId: TV_COUNTRY_ID },
+    {
+      gameId,
+      timezoneName,
+      langId,
+      userCountryId: tvCountryId || TV_COUNTRY_ID,
+    },
     { ttl: finished ? TTL_FINISHED : TTL_LIVE, maxAge },
   );
+
+/**
+ * 365scores' own country ids where its English name differs from the ISO
+ * name ("USA", "UAE"…), found by comparing the two lists. GB is the UK as a
+ * whole (166): England (1) is 365scores' "no country", which has no channels.
+ */
+const COUNTRY_OVERRIDES = {
+  GB: 166,
+  US: 18,
+  AE: 124,
+  TW: 179,
+  HK: 79,
+  CI: 74,
+  MM: 55,
+  KN: 215,
+  PH: 200,
+  TT: 148,
+  TC: 253,
+};
+
+const foldName = (text) =>
+  String(text || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z]/g, '');
+
+let countryIds = null;
+
+/**
+ * 365scores' country id for an ISO 3166 code ("PT" -> 11), or null. Built
+ * once from its country list, matched by English name, plus the overrides.
+ */
+async function countryIdFor(iso) {
+  const code = String(iso || '')
+    .trim()
+    .toUpperCase();
+  if (!/^[A-Z]{2}$/.test(code)) return null;
+  if (COUNTRY_OVERRIDES[code]) return String(COUNTRY_OVERRIDES[code]);
+  if (!countryIds) {
+    // In English: the names are matched against English region names.
+    const body = await get('/countries/', { langId: '1' }, { ttl: 7 * 86400 });
+    const byName = new Map(
+      (body.countries || [])
+        .filter((c) => !c.isInternational && !c.isNotReal)
+        .map((c) => [foldName(c.name), String(c.id)]),
+    );
+    const names = new Intl.DisplayNames(['en'], { type: 'region' });
+    const map = new Map();
+    for (const a of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') {
+      for (const b of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') {
+        let name;
+        try {
+          name = names.of(a + b);
+        } catch {
+          continue;
+        }
+        const id = byName.get(foldName(name));
+        if (id) map.set(a + b, id);
+      }
+    }
+    countryIds = map;
+  }
+  return countryIds.get(code) || null;
+}
 
 /**
  * Every football competition 365scores tracks (about 800), used to build the
@@ -458,6 +528,7 @@ const search = (query, { timezoneName, langId } = {}) =>
 module.exports = {
   Scores365Error,
   LIVE_MAX_AGE,
+  countryIdFor,
   resolveLangId,
   gamesOnDate,
   competitionFixtures,
