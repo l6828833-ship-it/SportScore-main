@@ -222,7 +222,13 @@ function fixture(game) {
   return {
     fixture: {
       id: num(game.id),
-      referee: null,
+      // Only a game's own detail lists its officials; the referee comes
+      // first. The games list has none, so a list fixture gets null.
+      referee:
+        (Array.isArray(game.officials) &&
+          game.officials[0] &&
+          game.officials[0].name) ||
+        null,
       timezone: 'UTC',
       date: iso,
       timestamp: iso ? Math.floor(Date.parse(iso) / 1000) : null,
