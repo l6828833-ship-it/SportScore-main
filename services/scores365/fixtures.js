@@ -87,10 +87,25 @@ function looksLikeCup(exposedId, game) {
  * through and bury the list, so a day asked for in a language carries each
  * competition's English name too. One catalogue request, cached like the rest.
  */
+/**
+ * Each competition's English name and its country's ISO code ("PT"), from
+ * the catalogue (cached), so the app can filter by name and put the reader's
+ * own country's leagues and cups first. International competitions have no
+ * country and get null.
+ */
 async function englishNames() {
   try {
     const body = await client.competitions({ langId: '1' });
-    return new Map((body.competitions || []).map((c) => [c.id, c.name]));
+    const out = new Map();
+    for (const c of body.competitions || []) {
+      out.set(c.id, {
+        name: c.name,
+        countryCode: await client
+          .isoForCountryId(c.countryId)
+          .catch(() => null),
+      });
+    }
+    return out;
   } catch {
     return new Map();
   }
@@ -142,7 +157,11 @@ async function fixturesForDate(
   ]);
   return (feed.games || []).map((g) => {
     const fixture = shape.fixture(g);
-    if (english) fixture.league.nameEn = english.get(g.competitionId) || null;
+    if (english) {
+      const entry = english.get(g.competitionId);
+      fixture.league.nameEn = (entry && entry.name) || null;
+      fixture.league.countryCode = (entry && entry.countryCode) || null;
+    }
     // 365scores flags a game for a few minutes after the final whistle.
     if (g.justEnded) fixture.fixture.status.justEnded = true;
     withAge(fixture, feed._asOf);

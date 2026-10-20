@@ -470,6 +470,10 @@ const foldName = (text) =>
     .replace(/[^a-z]/g, '');
 
 let countryIds = null;
+let countryIsos = null;
+
+/** 365scores' home nations, which have no ISO code of their own: all GB. */
+const UK_NATIONS = { 1: 'GB', 8: 'GB', 99: 'GB', 100: 'GB', 166: 'GB' };
 
 /**
  * 365scores' country id for an ISO 3166 code ("PT" -> 11), or null. Built
@@ -504,8 +508,21 @@ async function countryIdFor(iso) {
       }
     }
     countryIds = map;
+    countryIsos = new Map([...map].map(([iso, id]) => [id, iso]));
+    for (const [iso, id] of Object.entries(COUNTRY_OVERRIDES)) {
+      countryIsos.set(String(id), iso);
+    }
+    for (const [id, iso] of Object.entries(UK_NATIONS))
+      countryIsos.set(id, iso);
   }
   return countryIds.get(code) || null;
+}
+
+/** The ISO code ("PT") of one of 365scores' country ids, or null. */
+async function isoForCountryId(id) {
+  if (id == null) return null;
+  if (!countryIsos) await countryIdFor('PT');
+  return (countryIsos && countryIsos.get(String(id))) || null;
 }
 
 /**
@@ -529,6 +546,7 @@ module.exports = {
   Scores365Error,
   LIVE_MAX_AGE,
   countryIdFor,
+  isoForCountryId,
   resolveLangId,
   gamesOnDate,
   competitionFixtures,
