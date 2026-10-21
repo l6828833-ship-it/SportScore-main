@@ -393,6 +393,23 @@ function pageParams(link) {
   }
 }
 
+/**
+ * A team's past and upcoming games in EVERY competition — league, cups,
+ * continental, internationals — which a competition's own feed cannot give.
+ */
+const teamResults = (competitorId, { timezoneName, langId } = {}) =>
+  get(
+    '/games/results/',
+    { competitors: competitorId, timezoneName, langId },
+    { ttl: TTL_LIVE },
+  );
+const teamFixtures = (competitorId, { timezoneName, langId } = {}) =>
+  get(
+    '/games/fixtures/',
+    { competitors: competitorId, timezoneName, langId },
+    { ttl: TTL_LIVE },
+  );
+
 /** League table for a competition. */
 const standings = (competitionId, { timezoneName, langId } = {}) =>
   get(
@@ -552,6 +569,8 @@ module.exports = {
   competitionFixtures,
   competitionResults,
   competitionSeasonResults,
+  teamResults,
+  teamFixtures,
   standings,
   stats,
   game,

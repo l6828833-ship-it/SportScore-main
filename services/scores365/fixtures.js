@@ -368,7 +368,38 @@ const getLeagueFixtures = async (params = {}) => {
   };
 };
 
+/**
+ * One team's matches across all its competitions: the latest results and the
+ * upcoming fixtures, oldest first. `team` is the exposed team id.
+ */
+const getTeamFixtures = async (params = {}) => {
+  const teamId = Number(params.team);
+  if (!Number.isFinite(teamId) || teamId <= 0) {
+    return { error: 'A numeric `team` id is required' };
+  }
+  const opts = {
+    timezoneName: params.timezoneName,
+    langId: client.resolveLangId(params.lang || params.langId),
+  };
+  const [results, upcoming] = await Promise.all([
+    client.teamResults(teamId, opts).catch(() => ({ games: [] })),
+    client.teamFixtures(teamId, opts).catch(() => ({ games: [] })),
+  ]);
+  const seen = new Set();
+  const fixtures = [];
+  for (const g of [...(results.games || []), ...(upcoming.games || [])]) {
+    if (seen.has(g.id)) continue;
+    seen.add(g.id);
+    fixtures.push(shape.fixture(g));
+  }
+  fixtures.sort(
+    (a, b) => (a.fixture.timestamp || 0) - (b.fixture.timestamp || 0),
+  );
+  return { team: teamId, fixtures, updatedAt: Date.now() };
+};
+
 module.exports = {
+  getTeamFixtures,
   getFixtures,
   getFixtureById,
   getRounds,

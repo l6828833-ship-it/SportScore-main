@@ -55,6 +55,19 @@ const endpoints = {
 const getFixtures = (req, res) =>
   genericHandler(endpoints.fixtures, req, res, 'Failed to fetch fixtures');
 
+// http://localhost:3000/fixtures/getTeamFixtures?team=8204
+// A team's matches in every competition (365scores source only).
+const getTeamFixtures = (req, res) =>
+  genericHandler(
+    async (params) =>
+      fixturesModel.getTeamFixtures
+        ? fixturesModel.getTeamFixtures(params)
+        : { error: 'Team fixtures are not available from this source' },
+    req,
+    res,
+    'Failed to fetch team fixtures',
+  );
+
 // http://localhost:3000/fixtures/getLeagueFixtures?league=39
 // A competition's recent results + upcoming matches (for the league page).
 const getLeagueFixtures = (req, res) =>
@@ -62,7 +75,7 @@ const getLeagueFixtures = (req, res) =>
     endpoints.leagueFixtures,
     req,
     res,
-    'Failed to fetch league fixtures'
+    'Failed to fetch league fixtures',
   );
 
 // http://localhost:3000/fixtures/getFixtureById?id=215662
@@ -80,7 +93,7 @@ const getTeamHeadToHead = (req, res) =>
     endpoints.headtohead,
     req,
     res,
-    'Failed to fetch head to head'
+    'Failed to fetch head to head',
   );
 
 // http://localhost:3000/fixtures/getMatchStatistics?fixture=394
@@ -101,7 +114,7 @@ const getTeamPlayersStatistics = (req, res) =>
     endpoints.players,
     req,
     res,
-    'Failed to fetch player statistics'
+    'Failed to fetch player statistics',
   );
 
 // http://localhost:3000/fixtures/db/getFixtures?league=39&season=2022
@@ -111,7 +124,7 @@ const getFixturesFromDb = (req, res) =>
     fixturesModel.getFixtures, // pass the fetch function here
     req.query,
     res,
-    'No fixtures found for the provided parameters'
+    'No fixtures found for the provided parameters',
   );
 
 // http://localhost:3000/fixtures/db/getStatistics?fixture=394
@@ -121,7 +134,7 @@ const getHeadToHeadFromDb = (req, res) =>
     headToHeadModel.getHeadToHeadFixtures,
     req.query,
     res,
-    'No head-to-head data found for the provided parameters'
+    'No head-to-head data found for the provided parameters',
   );
 
 const getStatisticsFromDb = (req, res) =>
@@ -130,7 +143,7 @@ const getStatisticsFromDb = (req, res) =>
     statisticsModel.getFixtureStatistics,
     req.query,
     res,
-    'No statistics data found for the provided parameters'
+    'No statistics data found for the provided parameters',
   );
 
 const getEventsFromDb = (req, res) =>
@@ -139,7 +152,7 @@ const getEventsFromDb = (req, res) =>
     eventsModel.getFixtureEvents,
     req.query,
     res,
-    'No events data found for the provided parameters'
+    'No events data found for the provided parameters',
   );
 
 const getLineupsFromDb = (req, res) =>
@@ -148,7 +161,7 @@ const getLineupsFromDb = (req, res) =>
     lineupsModel.getFixtureLineups,
     req.query,
     res,
-    'No lineups data found for the provided parameters'
+    'No lineups data found for the provided parameters',
   );
 
 const getPlayersFromDb = (req, res) =>
@@ -157,13 +170,14 @@ const getPlayersFromDb = (req, res) =>
     playersModel.getFixturePlayers,
     req.query,
     res,
-    'No players data found for the provided parameters'
+    'No players data found for the provided parameters',
   );
 
 module.exports = {
   getFixtures,
   getFixtureById,
   getLeagueFixtures,
+  getTeamFixtures,
   getRounds,
   getTeamHeadToHead,
   getTeamStatistics,

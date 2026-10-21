@@ -8,6 +8,8 @@ router.get('/getFixtures', fixturesController.getFixtures);
 router.get('/getFixtureById', fixturesController.getFixtureById);
 // A competition's recent + upcoming matches (drives the league page).
 router.get('/getLeagueFixtures', fixturesController.getLeagueFixtures);
+// One team's matches across all its competitions.
+router.get('/getTeamFixtures', fixturesController.getTeamFixtures);
 router.get('/getRounds', fixturesController.getRounds);
 router.get('/getFixtureHeadToHead', fixturesController.getTeamHeadToHead);
 router.get('/getMatchStatistics', fixturesController.getTeamStatistics);
@@ -15,7 +17,7 @@ router.get('/getMatchEvents', fixturesController.getTeamEvents);
 router.get('/getMatchLineups', fixturesController.getTeamLineups);
 router.get(
   '/getMatchPlayerStatistics',
-  fixturesController.getTeamPlayersStatistics
+  fixturesController.getTeamPlayersStatistics,
 );
 
 // New routes for fetching data from the database
