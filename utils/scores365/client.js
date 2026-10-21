@@ -447,7 +447,7 @@ const TTL_FINISHED =
  */
 const game = (
   gameId,
-  { timezoneName, langId, finished = false, maxAge, tvCountryId } = {},
+  { timezoneName, langId, finished = false, maxAge, tvCountryId, ttl } = {},
 ) =>
   get(
     '/game/',
@@ -457,7 +457,7 @@ const game = (
       langId,
       userCountryId: tvCountryId || TV_COUNTRY_ID,
     },
-    { ttl: finished ? TTL_FINISHED : TTL_LIVE, maxAge },
+    { ttl: ttl || (finished ? TTL_FINISHED : TTL_LIVE), maxAge },
   );
 
 /**
@@ -562,6 +562,7 @@ const search = (query, { timezoneName, langId } = {}) =>
 module.exports = {
   Scores365Error,
   LIVE_MAX_AGE,
+  TV_COUNTRY_ID,
   countryIdFor,
   isoForCountryId,
   resolveLangId,

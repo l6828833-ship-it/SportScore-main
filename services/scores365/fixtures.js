@@ -262,6 +262,127 @@ const getFixtures = async (params = {}) => {
     : { error: 'Empty data after multiple attempts' };
 };
 
+/** Arab League members: for a reader there, the local channels ARE the Arabic ones. */
+const ARAB_COUNTRIES = new Set([
+  'SA',
+  'EG',
+  'MA',
+  'DZ',
+  'TN',
+  'LY',
+  'SD',
+  'MR',
+  'IQ',
+  'JO',
+  'SY',
+  'LB',
+  'PS',
+  'KW',
+  'QA',
+  'BH',
+  'AE',
+  'OM',
+  'YE',
+  'SO',
+  'DJ',
+  'KM',
+]);
+
+/** Channels do not move from one minute to the next: an hour of cache. */
+const TV_TTL = 3600;
+
+/** 365scores' own country id for each competition, from the catalogue (cached). */
+let competitionCountries = null;
+async function competitionCountryId(competitionId) {
+  if (!competitionCountries) {
+    try {
+      const body = await client.competitions({ langId: '1' });
+      competitionCountries = new Map(
+        (body.competitions || []).map((c) => [c.id, c.countryId]),
+      );
+    } catch {
+      return null;
+    }
+  }
+  return competitionCountries.get(competitionId) ?? null;
+}
+
+/**
+ * The broadcasters of one match, in up to three labelled groups.
+ *
+ * 365scores answers for ONE country per request (rights are territorial), and
+ * covers few of them: for most of the world the reader's own country has no
+ * listing at all. So three questions are asked, each only when it adds
+ * something:
+ *
+ *   local  the reader's country (the app sends it); null without one.
+ *   match  the match's own country — its competition's, or the home team's
+ *          for an international one — where it is shown best ("Sky Sports"
+ *          for the Premier League). Left out when it is the reader's country.
+ *   arab   the MENA region (beIN, SSC, Thmanyah), this service's core
+ *          audience, listed for almost every big match. Left out when the
+ *          reader is in an Arab country: then it is their local group.
+ *
+ * Only what 365scores lists is returned, never a guess: a group with no
+ * channels is null, and the apps decide which groups to show.
+ */
+async function tvGroups(
+  detail,
+  { id, localId, localIso, timezoneName, langId },
+) {
+  const menaId = String(client.TV_COUNTRY_ID);
+  const iso = String(localIso || '')
+    .trim()
+    .toUpperCase();
+  const lookup = async (countryId) => {
+    // The detail already read is the answer for its own country.
+    if (String(countryId) === String(localId || menaId))
+      return shape.tvChannels(detail);
+    try {
+      const payload = await client.game(id, {
+        tvCountryId: String(countryId),
+        timezoneName,
+        // Channel names come in the language asked for, like the rest.
+        langId,
+        ttl: TV_TTL,
+      });
+      return shape.tvChannels(payload.game);
+    } catch {
+      return [];
+    }
+  };
+  const group = async (countryId, code) => {
+    const channels = await lookup(countryId);
+    return channels.length ? { country: code || null, channels } : null;
+  };
+
+  const readerIsArab = ARAB_COUNTRIES.has(iso);
+  // The competition's country; for an international one (no country), the
+  // home team's.
+  const isoOf = (cid) =>
+    cid != null ? client.isoForCountryId(cid).catch(() => null) : null;
+  let matchId = await competitionCountryId(detail.competitionId);
+  let matchIso = await isoOf(matchId);
+  if (!matchIso) {
+    matchId = detail.homeCompetitor && detail.homeCompetitor.countryId;
+    matchIso = await isoOf(matchId);
+  }
+  if (!matchIso) matchId = null;
+  const sameAsLocal =
+    matchId == null ||
+    (localId && String(matchId) === String(localId)) ||
+    (matchIso && matchIso === iso) ||
+    // The match's country is an Arab one: the Arabic group covers it.
+    ARAB_COUNTRIES.has(matchIso || '');
+
+  const [local, match, arab] = await Promise.all([
+    localId ? group(localId, iso) : null,
+    sameAsLocal ? null : group(matchId, matchIso),
+    readerIsArab ? null : group(menaId, null),
+  ]);
+  return { local, match, arab };
+}
+
 /** One fixture with goal events. 365scores' `/game` carries events + lineups. */
 const getFixtureById = async (params = {}) => {
   const id = String(params.id || params.ids || params.fixture || '').trim();
@@ -294,6 +415,19 @@ const getFixtureById = async (params = {}) => {
   if (!detail) return { error: 'Fixture not found' };
 
   const base = withAge(shape.fixture(detail), asOf);
+  base.fixture.tv = await tvGroups(detail, {
+    id,
+    localId: tvCountryId,
+    localIso: params.country,
+    timezoneName: params.timezoneName,
+    langId: client.resolveLangId(params.lang || params.langId),
+  });
+  // Older apps show this one list without labels: the reader's own channels,
+  // or the Arabic ones when their country has none, rather than nothing.
+  const legacy = base.fixture.tv.local || base.fixture.tv.arab;
+  base.fixture.tv_channels = legacy
+    ? legacy.channels
+    : base.fixture.tv_channels;
   return {
     ...base,
     events: shape.events(detail),

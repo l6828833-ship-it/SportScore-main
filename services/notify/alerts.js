@@ -253,6 +253,115 @@ function message(fixture, arabic, change, extra) {
   };
 }
 
+/**
+ * The alert as a notification the phone shows by itself, on Android and iPhone.
+ *
+ * The system draws it, so it arrives when the app is closed and costs the app
+ * no wake-up. The data message above makes the Android app draw it, which a
+ * closed app often is not allowed to do, and the app dropped the kinds of
+ * alert its reader had turned off (yellow cards and half-time, by default).
+ * FCM treats high-priority messages that show nothing as noise and downgrades
+ * that phone's later ones, which Doze then holds back: alerts came late, or
+ * only once the app was opened.
+ *
+ * So the kind is part of the topic — `goal_team_104` is "goal alerts for team
+ * 104" — and a phone receives only the alerts it will show. The words are keys
+ * of the apps' own strings (`push_*`), filled with BOTH the English and the
+ * Arabic names in a fixed order; each language's string picks its own.
+ */
+const TITLES = {
+  kickoff: 'push_kickoff_title',
+  goal: 'push_goal_title',
+  yellow: 'push_yellow_title',
+  red: 'push_red_title',
+  halftime: 'push_halftime_title',
+  fulltime: 'push_fulltime_title',
+};
+
+function displayMessage(legacy) {
+  const data = legacy.data;
+  const type = data.type;
+  const title = TITLES[type];
+  if (!title) return null;
+  const homeAr = data.homeAr || data.home;
+  const awayAr = data.awayAr || data.away;
+  const away = data.side === 'away';
+  const aboutTeam = type === 'goal' || type === 'yellow' || type === 'red';
+  // The team the alert is about: the scorer's side, or the booked player's.
+  const titleArgs = aboutTeam
+    ? away
+      ? [data.away, awayAr]
+      : [data.home, homeAr]
+    : [];
+  const scorer = data.scorer || '';
+  const minute = data.minute || '';
+  let body = 'push_line';
+  if (type === 'kickoff') body = 'push_kickoff_body';
+  else if (aboutTeam) {
+    if (scorer && minute) body = 'push_line_scorer_minute';
+    else if (scorer) body = 'push_line_scorer';
+    else if (minute) body = 'push_line_minute';
+  }
+  const bodyArgs = [
+    data.home,
+    homeAr,
+    data.away,
+    awayAr,
+    data.homeGoals,
+    data.awayGoals,
+    scorer,
+    data.scorerAr || scorer,
+    minute,
+  ];
+  const topics = [
+    `team_${data.homeId}`,
+    `team_${data.awayId}`,
+    `league_${data.leagueId}`,
+    `match_${data.matchId}`,
+  ].map((topic) => `${type}_${topic}`);
+  // An alert an hour late is noise; a result keeps a little longer.
+  const ttl = type === 'fulltime' ? 3600 : 900;
+  const alert = {
+    'title-loc-key': title,
+    'subtitle-loc-key': 'push_league',
+    'subtitle-loc-args': [data.league, data.leagueAr || data.league],
+    'loc-key': body,
+    'loc-args': bodyArgs,
+  };
+  if (titleArgs.length) alert['title-loc-args'] = titleArgs;
+  return {
+    condition: fcm.condition(topics),
+    data,
+    android: {
+      priority: 'HIGH',
+      ttl: `${ttl}s`,
+      notification: {
+        title_loc_key: title,
+        ...(titleArgs.length ? { title_loc_args: titleArgs } : {}),
+        body_loc_key: body,
+        body_loc_args: bodyArgs,
+        channel_id: 'match_alerts',
+        icon: 'ic_stat_alert',
+        color: '#16A34A',
+        sound: 'default',
+        // One notification per match, replaced as the match goes on.
+        tag: `match_${data.matchId}`,
+      },
+    },
+    apns: {
+      headers: {
+        'apns-push-type': 'alert',
+        'apns-priority': '10',
+        'apns-expiration': String(Math.floor(Date.now() / 1000) + ttl),
+        'apns-collapse-id': `match_${data.matchId}`,
+      },
+      payload: {
+        aps: { alert, sound: 'default', 'thread-id': `match_${data.matchId}` },
+      },
+    },
+  };
+}
+
 /** One check. Returns what it saw and sent, for the scheduler's log. */
 async function tick() {
   if (!fcm.isConfigured()) {
@@ -342,15 +451,28 @@ async function tick() {
         : change.type === 'yellow' || change.type === 'red'
           ? await latestCard(fixture, change.type, change.side)
           : {};
-    try {
-      await fcm.send(
-        message(fixture, arabic.get(fixture.fixture.id), change, extra),
-      );
-      sent += 1;
-    } catch (error) {
-      failures.push(
-        `${change.type} ${fixture.fixture.id}: ${error.response ? error.response.status : error.message}`,
-      );
+    const legacy = message(
+      fixture,
+      arabic.get(fixture.fixture.id),
+      change,
+      extra,
+    );
+    // Android 1.2.2 and earlier still listen on the old topics for the data
+    // message; later Android versions and iPhones take the notification.
+    // Each is sent on its own, so one failing never costs the other its alert.
+    for (const [label, outgoing] of [
+      ['', legacy],
+      ['display ', displayMessage(legacy)],
+    ]) {
+      if (!outgoing) continue;
+      try {
+        await fcm.send(outgoing);
+        if (!label) sent += 1;
+      } catch (error) {
+        failures.push(
+          `${label}${change.type} ${fixture.fixture.id}: ${error.response ? error.response.status : error.message}`,
+        );
+      }
     }
   }
   return {
@@ -417,14 +539,20 @@ async function test({ topic, type = 'goal' } = {}) {
     error.status = 503;
     throw error;
   }
-  if (!/^(team|league|match)_\d+$/.test(String(topic || ''))) {
+  // `goal_team_104` tests the notification form, as phones on 1.2.3+ get it.
+  const kind =
+    /^(kickoff|goal|yellow|red|halftime|fulltime)_((team|league|match)_\d+)$/.exec(
+      String(topic || ''),
+    );
+  if (!kind && !/^(team|league|match)_\d+$/.test(String(topic || ''))) {
     const error = new Error(
-      '`topic` must look like team_104, league_39 or match_4870753',
+      '`topic` must look like team_104, league_39, match_4870753 or goal_team_104',
     );
     error.status = 400;
     throw error;
   }
-  await fcm.send({
+  if (kind) type = kind[1];
+  const sample = {
     topic,
     data: {
       type,
@@ -447,8 +575,21 @@ async function test({ topic, type = 'goal' } = {}) {
       test: 'true',
     },
     android: { priority: 'HIGH', ttl: '300s' },
-  });
+  };
+  if (kind) {
+    const message = displayMessage(sample);
+    if (!message) {
+      const error = new Error(`Unknown alert kind "${type}"`);
+      error.status = 400;
+      throw error;
+    }
+    delete message.condition;
+    message.topic = topic;
+    await fcm.send(message);
+  } else {
+    await fcm.send(sample);
+  }
   return { sent: 1, topic, type };
 }
 
-module.exports = { tick, run, test, changes };
+module.exports = { tick, run, test, changes, displayMessage };
