@@ -77,6 +77,7 @@ app.use('/predictions', predictionsRoutes);
 app.use('/news', newsRoutes);
 app.use('/search', searchRoutes);
 app.use('/notify', notifyRoutes);
+app.use('/img', require('./routes/images'));
 
 /**
  * Readiness probe. Consumers use this to tell "backend is down" apart from
@@ -169,15 +170,25 @@ function upstreamInfo() {
   };
 }
 
-app.get('/health', (_, res) => {
+/** The operator (X-Notify-Key) sees which provider is behind the data. */
+function isOperator(req) {
+  const expected = process.env.NOTIFY_KEY || '';
+  return Boolean(expected) && req.get('x-notify-key') === expected;
+}
+
+app.get('/health', (req, res) => {
+  const upstream = upstreamInfo();
   res.json({
     ok: true,
     service: 'sportscore',
-    source: source.SOURCE,
+    ...(isOperator(req) ? { source: source.SOURCE } : {}),
     // The question a consumer actually cares about: can this server return
     // football data right now? Only API-Football can answer no.
     ready: !source.isApiFootball() || hasApiKey(),
-    upstream: upstreamInfo(),
+    // The public sees only what consumers read (the website's season picker).
+    upstream: isOperator(req)
+      ? upstream
+      : { historicalSeasons: upstream.historicalSeasons },
     database: { configured: Boolean(process.env.DB), connected: dbReady() },
     leagueFilter:
       source.isApiFootball() && allowedLeagueIds ? [...allowedLeagueIds] : null,

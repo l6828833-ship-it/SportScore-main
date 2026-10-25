@@ -7,9 +7,15 @@
 
 const { toExposedId } = require('./leagues');
 
-const IMAGE_BASE =
-  process.env.SCORES365_IMAGE_BASE ||
-  'https://imagecache.365scores.com/image/upload/f_png,w_80,h_80,c_limit,q_auto:eco,dpr_2/v1';
+/**
+ * Pictures are served by this server's /img route (routes/images.js), so the
+ * apps and the website never load them from the provider's CDN.
+ */
+const PUBLIC_URL = (
+  process.env.PUBLIC_URL ||
+  'https://sportscore-main-git-44974813699.europe-west1.run.app'
+).replace(/\/+$/, '');
+const IMAGE_BASE = `${PUBLIC_URL}/img`;
 
 const num = (v) => {
   if (v === null || v === undefined || v === '') return null;
@@ -28,17 +34,17 @@ const score = (v) => {
 
 /** Competitor (team) logo from its id. */
 function competitorLogo(id) {
-  return id ? `${IMAGE_BASE}/Competitors/${id}` : null;
+  return id ? `${IMAGE_BASE}/team/${id}.png` : null;
 }
 
 /** Competition logo from its 365scores id. */
 function competitionLogo(scores365Id) {
-  return scores365Id ? `${IMAGE_BASE}/Competitions/${scores365Id}` : null;
+  return scores365Id ? `${IMAGE_BASE}/league/${scores365Id}.png` : null;
 }
 
 /** Athlete (player) headshot from its id. */
 function athleteImage(id) {
-  return id ? `${IMAGE_BASE}/Athletes/${id}` : null;
+  return id ? `${IMAGE_BASE}/player/${id}.png` : null;
 }
 
 /**
