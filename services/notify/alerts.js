@@ -31,6 +31,7 @@ const fixtures = require('../scores365/fixtures');
 const { isSupported } = require('../../utils/scores365/leagues');
 const store = require('../../utils/notify/store');
 const fcm = require('../../utils/notify/fcm');
+const bigmatch = require('./bigmatch');
 
 const LIVE = new Set(['1H', '2H', 'HT', 'ET', 'BT', 'P', 'LIVE', 'INT']);
 const DONE = new Set(['FT', 'AET', 'PEN']);
@@ -418,11 +419,16 @@ async function tick() {
       games[id] = game;
   }
 
+  // Big-match reminders: decided here, sent only once the state that records
+  // them is saved, so overlapping checks cannot both send one.
+  const big = bigmatch.plan(english, state && state.big, now);
+
   // Nothing new and saved recently: no write. Checks every 10 s would
   // otherwise write the state 6 times a minute for nothing.
   const unchanged =
     fresh &&
     pending.length === 0 &&
+    big.picks.length === 0 &&
     now - (state.updatedAt || 0) < SAVE_AT_LEAST_EVERY_MS &&
     JSON.stringify(strip(games)) === JSON.stringify(strip(previous));
   if (unchanged) {
@@ -434,16 +440,38 @@ async function tick() {
       failures: [],
     };
   }
-  if (!(await store.save({ updatedAt: now, games }, version))) {
+  if (!(await store.save({ updatedAt: now, games, big: big.next }, version))) {
     return { skipped: 'another check saved first', events: 0, sent: 0 };
   }
 
   // Arabic names only when there is something to send.
   const arabic = new Map(
-    pending.length ? (await matches(ARABIC)).map((f) => [f.fixture.id, f]) : [],
+    pending.length || big.picks.length
+      ? (await matches(ARABIC)).map((f) => [f.fixture.id, f])
+      : [],
   );
   let sent = 0;
   const failures = [];
+  const reminders = [];
+  for (const { audience, fixture, score } of big.picks) {
+    let delivered = 0;
+    for (const outgoing of bigmatch.messages(
+      fixture,
+      arabic.get(fixture.fixture.id),
+      audience,
+      now,
+    )) {
+      try {
+        await fcm.send(outgoing);
+        delivered += 1;
+      } catch (error) {
+        failures.push(
+          `bigmatch ${audience} ${fixture.fixture.id}: ${error.response ? error.response.status : error.message}`,
+        );
+      }
+    }
+    reminders.push(`${audience} ${fixture.fixture.id} score ${score}, ${delivered} messages`);
+  }
   for (const { fixture, change } of pending) {
     const extra =
       change.type === 'goal'
@@ -480,6 +508,7 @@ async function tick() {
     tracked: Object.keys(games).length,
     events: pending.length,
     sent,
+    reminders,
     failures: failures.slice(0, 5),
   };
 }
@@ -538,6 +567,28 @@ async function test({ topic, type = 'goal' } = {}) {
     const error = new Error('FCM_PROJECT_ID is not set');
     error.status = 503;
     throw error;
+  }
+  // `away_arab_20765`: a sample big-match reminder to ONE dated topic. A phone
+  // that opened the app on day N (days since 1970, UTC) is on `away_*_{N+3}`.
+  if (/^away_(arab|world)_\d+$/.test(String(topic || ''))) {
+    const message = bigmatch.notification(
+      {
+        fixture: { id: 0, timestamp: Math.floor(Date.now() / 1000) + 3600 },
+        league: { id: 2, name: 'Champions League', round: 'Round 4' },
+        teams: {
+          home: { id: 131, name: 'Real Madrid' },
+          away: { id: 110, name: 'Manchester City' },
+        },
+      },
+      {
+        league: { name: 'دوري أبطال أوروبا' },
+        teams: { home: { name: 'ريال مدريد' }, away: { name: 'مانشستر سيتي' } },
+      },
+    );
+    message.topic = topic;
+    message.data.test = 'true';
+    await fcm.send(message);
+    return { sent: 1, topic, type: 'bigmatch' };
   }
   // `goal_team_104` tests the notification form, as phones on 1.2.3+ get it.
   const kind =

@@ -247,8 +247,24 @@ for what the reader follows.
   - Compares every match in play with the previous check (one Firestore
     document, `notifier/live`) and sends a data message per change. The first
     check after a pause of more than ten minutes only records what is going on.
+- **Tournament-day reminders** (same tick, `services/notify/bigmatch.js`)
+  - "Champions League today · Big match: Real Madrid – Man City", about an hour
+    before that match. One tournament and one match, only tournaments and cups
+    (World Cup, Champions League, cup semi-finals and finals), never a league
+    matchday.
+  - Only to readers who have **not opened the app for at least 48 hours**; at
+    most one a day and two a week per audience. World Cup and Champions League
+    finals go past the weekly cap.
+  - Audiences: `arab` gets the world's tournaments and the Arab ones (AFCON,
+    CAF/AFC Champions League, Arab cup finals); `world` never gets an Arab
+    tournament or a highlight involving an Arab club or national team.
+  - Each app open subscribes the phone to `away_{audience}_{day}`, `day` being
+    three days ahead (days since 1970-01-01, UTC). A reminder goes to the dated
+    topics of the last 45 days, five per message.
+  - Turned off in the apps' Settings › Match alerts › Tournament reminders.
 - **Send a sample**
   - Endpoint: `POST /notify/test?topic=team_104&type=goal`
+  - `?topic=away_arab_20765` sends a sample reminder to one dated topic.
 - Both need the header `X-Notify-Key` equal to `NOTIFY_KEY`; without
   `NOTIFY_KEY` set the routes answer 404.
 - Environment: `NOTIFY_KEY`, `FCM_PROJECT_ID` (the Firebase project), and
