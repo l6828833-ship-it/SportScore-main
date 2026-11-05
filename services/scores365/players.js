@@ -65,7 +65,11 @@ function categoryTypeId(category) {
  * payload that omits `statsTypes`.
  */
 function categoryRows(body, typeId, name) {
-  const cats = (body.stats && body.stats.athletesStats) || [];
+  // A list of categories, or (since late 2026) `{ tables: [...], filters }`.
+  const raw = body.stats && body.stats.athletesStats;
+  const cats = Array.isArray(raw)
+    ? raw
+    : (raw && Array.isArray(raw.tables) && raw.tables) || [];
   const cat =
     cats.find((c) => categoryTypeId(c) === typeId) ||
     cats.find((c) => String(c.name || '').toLowerCase() === name.toLowerCase());
